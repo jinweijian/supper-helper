@@ -34,8 +34,8 @@ This change creates an implementation-ready architecture plan before refactoring
   - `src/domain.ts`
   - `test/super-helper.test.mjs`
 - Affected documentation:
-  - `docs/agent-design.md`
-  - `docs/technical-architecture.md`
+  - `docs/architecture/agents.md`
+  - `docs/architecture/overview.md`
   - OpenSpec artifacts under `openspec/changes/refactor-agent-runtime-architecture/`
 - No new external dependencies are required for the design.
 - No breaking change is planned for CLI commands, local HTTP endpoints, storage format, or user-facing chat behavior during the first implementation pass.

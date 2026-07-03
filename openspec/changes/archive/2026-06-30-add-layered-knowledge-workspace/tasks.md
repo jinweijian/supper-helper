@@ -1,9 +1,9 @@
 ## 1. OpenSpec and Architecture Baseline
 
 - [x] 1.1 Review this change's `proposal.md`, `design.md`, and `specs/layered-knowledge-diagnosis/spec.md` before implementation.
-- [x] 1.2 Update `docs/development-standards.md` with the new `src/knowledge/` module ownership boundary.
-- [x] 1.3 Update `docs/technical-architecture.md` with the layered knowledge-first diagnostic pipeline.
-- [x] 1.4 Update `docs/agent-design.md` with Knowledge Router, Evidence Judge, and Case Curator responsibilities.
+- [x] 1.2 Update `docs/standards/development.md` with the new `src/knowledge/` module ownership boundary.
+- [x] 1.3 Update `docs/architecture/overview.md` with the layered knowledge-first diagnostic pipeline.
+- [x] 1.4 Update `docs/architecture/agents.md` with Knowledge Router, Evidence Judge, and Case Curator responsibilities.
 - [x] 1.5 Run `pnpm lint` after documentation-only changes.
 
 ## 2. Workspace Schema and Knowledge Templates

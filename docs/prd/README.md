@@ -6,17 +6,19 @@
 - 适用范围：`super helper` 本地 MVP 到企业支持首诊助手阶段
 - 当前重点：用户输入一个问题后，系统如何通过 Agent、知识库、Worker、证据审核和 Presentation 生成可信回答
 - 关联文档：
-  - [产品迭代规划](product-evolution-plan.md)
-  - [Agent 设计](../agent-design.md)
-  - [Agent Runtime 技术总览](../agent-runtime/README.md)
-  - [技术架构](../technical-architecture.md)
-  - [开发规范](../development-standards.md)
+  - [产品迭代规划](evolution-plan.md)
+  - [Agent 设计](../architecture/agents.md)
+  - [Runtime 总览](../architecture/runtime/README.md)
+  - [技术架构](../architecture/overview.md)
+  - [开发规范](../standards/development.md)
 
 ## 1. 产品定位
 
 `super helper` 是企业内部技术支持首诊助手，不是通用 Agent 市场，也不是自动修复工具。
 
 它连接当前项目 workspace、企业知识库、历史 case、只读 MCP 数据源和 Claude Code Worker，让客服、运营、销售、产品、技术支持新人和内部员工能用自然语言提出问题，并得到有证据、可追溯、可升级的回答。
+
+主体验是极简对话页：输入框吸底，用户始终从聊天入口描述问题，诊断细节进入 `查看诊断日志`。
 
 核心承诺：
 

@@ -31,7 +31,7 @@
 
 ## 5. 审核日志卫生 — phase 文档同步
 
-- [x] 5.1 在 `docs/development-standards.md` 的 "Preserve established phases" 列表补齐 `event-recorder.ts` 实际定义的 40+ phase（`experience_*`、`knowledge_router_*`、`knowledge_search_*`、`evidence_judge_*`、`deep_query_*`、`case_review_*`、`case_curator_*`、`knowledge_answer_selected`、`code_escalation_requested`、`evidence_validation_result`、`model_preflight_failed/overridden_by_local_dispatch`、`model_review_failed`、`follow_up_diagnostic_requested`、`resolution_confirmed`）
+- [x] 5.1 在 `docs/standards/development.md` 的 "Preserve established phases" 列表补齐 `event-recorder.ts` 实际定义的 40+ phase（`experience_*`、`knowledge_router_*`、`knowledge_search_*`、`evidence_judge_*`、`deep_query_*`、`case_review_*`、`case_curator_*`、`knowledge_answer_selected`、`code_escalation_requested`、`evidence_validation_result`、`model_preflight_failed/overridden_by_local_dispatch`、`model_review_failed`、`follow_up_diagnostic_requested`、`resolution_confirmed`）
 - [x] 5.2 在 `src/observability/log-blocks.ts` 为未知 phase 增加 fallback 渲染
 - [x] 5.3 新增 contract test：`event-recorder.ts` 中每个 phase 都在 `development-standards.md` 文档列表中
 - [x] 5.4 运行 `pnpm lint` 验证文档
@@ -98,9 +98,9 @@
 
 ## 12. 文档同步与最终验证
 
-- [x] 12.1 更新 `docs/development-standards.md` 的 phase 列表（与 task 5.1 协同）
-- [x] 12.2 更新 `docs/module-boundary-standards.md` 的根目录收敛规则，注明 deprecation re-export 过渡期
-- [x] 12.3 更新 `docs/technical-architecture.md` 的 deep query planner 章节，说明 module 驱动与项目类型适配
+- [x] 12.1 更新 `docs/standards/development.md` 的 phase 列表（与 task 5.1 协同）
+- [x] 12.2 更新 `docs/standards/module-boundaries.md` 的根目录收敛规则，注明 deprecation re-export 过渡期
+- [x] 12.3 更新 `docs/architecture/overview.md` 的 deep query planner 章节，说明 module 驱动与项目类型适配
 - [x] 12.4 更新 `AGENTS.md` 如有需要
 - [x] 12.5 运行 `pnpm lint` 验证文档
 - [x] 12.6 运行 `pnpm typecheck` 验证类型

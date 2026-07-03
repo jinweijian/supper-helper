@@ -49,7 +49,7 @@ The system MUST keep repository development instructions separate from product A
 #### Scenario: Coding agent reads repository instructions
 
 - **WHEN** a coding agent or developer needs rules for modifying this repository
-- **THEN** they SHALL use root `AGENTS.md` and `docs/development-standards.md`
+- **THEN** they SHALL use root `AGENTS.md` and `docs/standards/development.md`
 
 #### Scenario: Product runtime reads Agent behavior
 
@@ -144,7 +144,7 @@ Development documentation MUST include `src/agents/` as a first-class module bou
 
 #### Scenario: Developer checks module ownership
 
-- **WHEN** a developer reads `docs/development-standards.md`
+- **WHEN** a developer reads `docs/standards/development.md`
 - **THEN** they SHALL find that `src/agents/` owns product Agent configuration documents and role pairing registry, and must not own runtime orchestration, HTTP routing, worker execution, or persistence
 
 #### Scenario: Docs lint guards the new boundary

@@ -448,7 +448,7 @@ test('deep query planning uses rag missing elements as anchor terms', () => {
 
 test('runtime event phases are documented in development standards', () => {
   const source = readFileSync(new URL('../src/runtime/event-recorder.ts', import.meta.url), 'utf8');
-  const docs = readFileSync(new URL('../docs/development-standards.md', import.meta.url), 'utf8');
+  const docs = readFileSync(new URL('../docs/standards/development.md', import.meta.url), 'utf8');
   const phases = Array.from(source.matchAll(/phase:\s*'([^']+)'/g), (match) => match[1])
     .filter((phase, index, all) => all.indexOf(phase) === index)
     .sort();

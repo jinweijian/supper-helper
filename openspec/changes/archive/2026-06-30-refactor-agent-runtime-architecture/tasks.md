@@ -48,8 +48,8 @@
 
 ## 6. Documentation and Final Verification
 
-- [x] 6.1 Update `docs/technical-architecture.md` with the implemented runtime, gateway, sessions, worker adapter, and observability layout.
-- [x] 6.2 Update `docs/agent-design.md` to reference the concrete runtime modules backing Preflight, DiagnosticRequest, worker output contract, and Agent Review.
+- [x] 6.1 Update `docs/architecture/overview.md` with the implemented runtime, gateway, sessions, worker adapter, and observability layout.
+- [x] 6.2 Update `docs/architecture/agents.md` to reference the concrete runtime modules backing Preflight, DiagnosticRequest, worker output contract, and Agent Review.
 - [x] 6.3 Update README development notes if import paths or architecture overview changed.
 - [x] 6.4 Run `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `pnpm test`.
 - [x] 6.5 Review the final file layout to ensure `src/agent.ts`, `src/server.ts`, and `src/claude-worker.ts` are thin facades or narrowly scoped modules.

@@ -247,7 +247,7 @@ src/retrieval/
 - 失败、空数据、缺凭证、超时、限流、脏缓存、旧 artifact 如何处理？
 - 默认测试是否不联网、不花钱、不依赖真实凭证？
 - 是否需要 fake/fixture acceptance 和 real opt-in acceptance？
-- 是否需要更新 `docs/development-standards.md`、`docs/technical-architecture.md` 或 OpenSpec artifacts？
+- 是否需要更新 `docs/standards/development.md`、`docs/architecture/overview.md` 或 OpenSpec artifacts？
 
 没有完成这份清单的实现，不能视为架构完成。
 

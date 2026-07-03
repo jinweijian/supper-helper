@@ -345,7 +345,7 @@ Required sequence:
    -> GREEN 后记录 disabled/fake smoke 输出
 
 5. Docs/boundary gate
-   -> 更新 docs/development-standards.md 和 docs/technical-architecture.md
+   -> 更新 docs/standards/development.md 和 docs/architecture/overview.md
    -> 明确 src/embedding/ 与 src/knowledge/ 的新边界
    -> 不能留下“src/knowledge/ 不拥有任何 vector artifact”的旧表述
 

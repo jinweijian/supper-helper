@@ -13,16 +13,16 @@
 
 请用中文与用户沟通。
 
-本仓库不是随意 vibe coding 的项目。后续任何 AI coding、人工开发、重构、修复都必须遵守本文件、`docs/development-standards.md` 和 `docs/module-boundary-standards.md` 的模块边界。
+本仓库不是随意 vibe coding 的项目。后续任何 AI coding、人工开发、重构、修复都必须遵守本文件、`docs/standards/development.md` 和 `docs/standards/module-boundaries.md` 的模块边界。
 
 ## 必读顺序
 
 在修改代码前，先阅读：
 
-1. `docs/development-standards.md`
-2. `docs/module-boundary-standards.md`
-3. `docs/technical-architecture.md`
-4. `docs/agent-design.md`
+1. `docs/standards/development.md`
+2. `docs/standards/module-boundaries.md`
+3. `docs/architecture/overview.md`
+4. `docs/architecture/agents.md`
 5. `src/agents/README.md`
 6. `src/agents/main.md`
 
@@ -41,7 +41,7 @@
 ## 开发硬规则
 
 - 新功能必须先确定所属模块；无法归属时先更新设计文档，不要直接写代码。
-- 新功能、重构、provider 接入、检索策略、CLI 子命令必须遵守 `docs/module-boundary-standards.md` 的分层、适配器和拆文件规则。
+- 新功能、重构、provider 接入、检索策略、CLI 子命令必须遵守 `docs/standards/module-boundaries.md` 的分层、适配器和拆文件规则。
 - 不允许把一个完整流程从入口文件一路写到底。
 - 不允许把 contract、factory、adapter、CLI 输出、业务策略混在同一文件；出现混合时必须先拆边界或写 OpenSpec 说明过渡方案。
 - 不允许在 route 里调用 Claude worker 或模型。

@@ -10,7 +10,7 @@ Implemented:
 - Redacted `raw_output.detail.stdout` in `workerTrace`.
 - Replaced duplicated diagnostic/knowledge evidence payloads in audit decision events with `evidenceIds` and decision summary fields while retaining `knowledge_search_result` as the evidence dictionary event.
 - Added `preflightKnowledgeAnswer` and called it on the knowledge direct-answer path so direct answers also emit `preflight_decision`.
-- Documented runtime event phases in `docs/development-standards.md`.
+- Documented runtime event phases in `docs/standards/development.md`.
 - Added Deep Query module-to-artifact target mapping, project-type path hints, filtered anchor terms, and `projectType` propagation through knowledge code escalation.
 - Added glossary document term extraction so Deep Query anchor filtering can preserve glossary-defined short business terms.
 - Added log-block evidence ID lookup from the `knowledge_search_result` dictionary without duplicating full evidence objects in persisted decision events.
@@ -23,8 +23,8 @@ Implemented:
 - Moved production importers to owner paths while preserving legacy public import compatibility.
 - Added `src/knowledge/health-service.ts` so gateway DTO/routes no longer own knowledge health + configured retrieval composition.
 - Added `src/workers/default-worker-factory.ts` and injected the worker factory into `GatewayApplicationContext` so gateway context no longer directly constructs `ClaudeCodeWorker`.
-- Documented Deep Query module/project-type behavior in `docs/technical-architecture.md`.
-- Documented OpenSpec-scoped deprecation re-export rules in `docs/module-boundary-standards.md`.
+- Documented Deep Query module/project-type behavior in `docs/architecture/overview.md`.
+- Documented OpenSpec-scoped deprecation re-export rules in `docs/standards/module-boundaries.md`.
 - Reviewed `AGENTS.md`; no update was needed because its existing module-boundary rules already match the owner-path/deprecation transition.
 
 Contract tests added in `test/runtime-hardening.test.mjs` cover:

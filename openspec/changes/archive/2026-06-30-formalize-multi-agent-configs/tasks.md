@@ -57,15 +57,15 @@
 
 ## 7. Multi-Agent Architecture Documentation
 
-- [x] 7.1 Update `docs/technical-architecture.md` to model super helper as one main Agent plus configured input-review, experience, output-review, and presentation sub-agents, separate from workers/tools.
-- [x] 7.2 Update `docs/agent-design.md` to reference `src/agents/main.md` as the authoritative main Agent behavior spec and list the current role pairings.
-- [x] 7.3 Update `docs/development-standards.md` to add `src/agents/` and the registry to the module ownership map and anti-patterns.
+- [x] 7.1 Update `docs/architecture/overview.md` to model super helper as one main Agent plus configured input-review, experience, output-review, and presentation sub-agents, separate from workers/tools.
+- [x] 7.2 Update `docs/architecture/agents.md` to reference `src/agents/main.md` as the authoritative main Agent behavior spec and list the current role pairings.
+- [x] 7.3 Update `docs/standards/development.md` to add `src/agents/` and the registry to the module ownership map and anti-patterns.
 - [x] 7.4 Update `README.md` to separate repository development rules from product Agent configuration and point to `src/agents/main.md` plus the `src/agents/` registry.
 - [x] 7.5 Update `AGENTS.md` so future coding agents know that product Agent configs and role pairings belong under `src/agents/`.
 
 ## 8. Docs Lint and Regression Coverage
 
-- [x] 8.1 Update `scripts/verify-docs.mjs` to check `src/agents/main.md`, `src/agents/input-review.md`, `src/agents/experience.md`, `src/agents/output-review.md`, `src/agents/presentation.md`, `src/agents/registry.json`, `AGENTS.md`, and `docs/development-standards.md` for the new separation.
+- [x] 8.1 Update `scripts/verify-docs.mjs` to check `src/agents/main.md`, `src/agents/input-review.md`, `src/agents/experience.md`, `src/agents/output-review.md`, `src/agents/presentation.md`, `src/agents/registry.json`, `AGENTS.md`, and `docs/standards/development.md` for the new separation.
 - [x] 8.2 Update tests or docs checks to ensure future sub-agent configs and stage pairings are expected under `src/agents/`.
 - [x] 8.3 Run `pnpm lint` and fix documentation guard failures.
 - [x] 8.4 Run focused runtime and route compatibility tests after the config move.

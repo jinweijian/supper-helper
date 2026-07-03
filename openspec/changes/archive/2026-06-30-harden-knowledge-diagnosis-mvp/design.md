@@ -282,7 +282,7 @@ Alternatives considered:
 
 Decision:
 
-- 更新 `docs/technical-architecture.md` 和 `docs/agent-design.md` 中与当前实现不一致的旧段落。
+- 更新 `docs/architecture/overview.md` 和 `docs/architecture/agents.md` 中与当前实现不一致的旧段落。
 - 新增或更新验收文档，说明 knowledge hardening 的运行命令、报告位置和风险。
 
 Rationale:

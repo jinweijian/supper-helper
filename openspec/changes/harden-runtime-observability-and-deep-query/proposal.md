@@ -47,10 +47,10 @@
 
 ## Impact
 
-- **主要影响**：`src/runtime/event-recorder.ts`、`src/runtime/deep-query-planner.ts`、`src/runtime/query-correction.ts`、`src/runtime/knowledge-diagnosis.ts`、`src/runtime/worker-diagnosis.ts`、`src/observability/log-blocks.ts`、`src/observability/worker-trace.ts`、`docs/development-standards.md`。
+- **主要影响**：`src/runtime/event-recorder.ts`、`src/runtime/deep-query-planner.ts`、`src/runtime/query-correction.ts`、`src/runtime/knowledge-diagnosis.ts`、`src/runtime/worker-diagnosis.ts`、`src/observability/log-blocks.ts`、`src/observability/worker-trace.ts`、`docs/standards/development.md`。
 - **迁移影响**：`src/model.ts` → `src/providers/model/`、`src/preflight.ts` → `src/runtime/`、`src/storage.ts` → `src/sessions/`、`src/model-smoke-test.ts` → `src/providers/model/`；更新所有 importer。
 - **拆分影响**：`src/ui.ts`、`src/knowledge/quality.ts`、`src/onboarding/service.ts`、`src/runtime/event-recorder.ts`、`src/setup-ui.ts` 等超标文件；保持 public export 与 UI HTML 字符串输出不变。
 - **gateway 影响**：`src/gateway/dto.ts`、`src/gateway/routes/knowledge-routes.ts`、`src/gateway/application-context.ts`；保持 HTTP response shape 和 `/api/knowledge/*` 行为兼容。
 - **持久化影响**：case JSON shape 保持可读，旧 case 的 `deepQuery.likelyPaths` 与 `anchorTerms` 旧 shape 仍可读但 runtime 不再作为输入；新 case 采用语义化结构。
 - **测试影响**：新增日志 redaction、evidence 引用化、phase 同步、deep query planner 适配、模块边界迁移的 contract tests；更新现有 runtime/observability/gateway tests。
-- **文档影响**：同步 `docs/development-standards.md` 的 phase 列表、`docs/module-boundary-standards.md` 的根目录收敛规则、`docs/technical-architecture.md` 的 deep query planner 章节。
+- **文档影响**：同步 `docs/standards/development.md` 的 phase 列表、`docs/standards/module-boundaries.md` 的根目录收敛规则、`docs/architecture/overview.md` 的 deep query planner 章节。

@@ -59,7 +59,7 @@
 ## Anti-Fake-Complete Audit
 
 - Production composition versus mock-only coverage: runtime, health, acceptance and retrieval CLI all route through configured retrieval or production runtime evaluation; tests include gateway and CLI execution, not only direct unit mocks.
-- Static/dynamic import, barrel, package, declaration and docs scan: empty for deleted paths/symbols/commands across `src`, clean `dist`, current docs, README, AGENTS and `package.json` (historical `docs/superpowers/**` snapshots excluded).
+- Static/dynamic import, barrel, package, declaration and docs scan: empty for deleted paths/symbols/commands across `src`, clean `dist`, current docs, README, AGENTS and `package.json` (historical `docs/archive/superpowers/**` snapshots excluded).
 - Hybrid budgets/filters/grounding/strict Judge regression: focused tests cover 40/40 recall, Top 20 rerank input, Top 8 final budget, metadata prefilters, parent provenance and fail-closed evidence.
 - Privacy/defaults: verification uses disabled/fake providers, temporary workspaces and no real credentials; smoke dashboard used isolated `--home` and loopback.
 - External/persisted contracts: public HTTP routes, UI snapshots, config, SecretRef, session/case persistence and knowledge artifacts stayed compatible; only private imports and duplicate unshipped commands intentionally break.
@@ -82,5 +82,5 @@
 - Additional private barrel `src/cli/index.ts` was deleted because it only preserved internal command alias imports and caused stale `dist/cli/index.js` usage in tests.
 - `knowledge/health` no longer imports retrieval directly; callers inject a configured retriever so knowledge remains free of retrieval/provider ownership.
 - Full test count changed from `247` to `243` because old compatibility existence/equality tests were removed with the private APIs they covered.
-- Historical `docs/superpowers/**` planning snapshots still mention old paths; current architecture scans exclude that archive-like history and current docs no longer advertise old entrypoints.
+- Historical `docs/archive/superpowers/**` planning snapshots still mention old paths; current architecture scans exclude that archive-like history and current docs no longer advertise old entrypoints.
 - Real SiliconFlow/source-review/holdout validation remains not run without explicit credentials/environment; no task in this change depends on it.

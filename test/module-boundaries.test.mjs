@@ -111,7 +111,7 @@ test('deleted compatibility symbols are not re-exported or routed under new name
     const absolute = join(repoRoot, scanRoot);
     if (!existsSync(absolute)) return [];
     return statSync(absolute).isDirectory() ? allTextFilesUnder(absolute) : [absolute];
-  }).filter((path) => !relativeSource(path).startsWith('docs/superpowers/'));
+  }).filter((path) => !relativeSource(path).startsWith('docs/archive/superpowers/'));
   assertNoImportPattern(
     files,
     [
