@@ -879,7 +879,7 @@ git commit -m "test: add coverage agent degradation regression
 
 **Files:**
 - Modify: `src/agents/evidence-judge.md`
-- Modify: `docs/agent-design.md`
+- Modify: `docs/architecture/agents.md`
 
 - [ ] **Step 1: 在 evidence-judge.md 补充 Coverage Agent 协作说明**
 
@@ -890,9 +890,9 @@ git commit -m "test: add coverage agent degradation regression
 - Coverage Agent 调用失败或未开启时，维持 Evidence Judge 原结论，不阻断主流程。
 ```
 
-- [ ] **Step 2: 在 docs/agent-design.md 更新 Knowledge-First 流程描述**
+- [ ] **Step 2: 在 docs/architecture/agents.md 更新 Knowledge-First 流程描述**
 
-在 `docs/agent-design.md` 中搜索 `Knowledge-First` 或 `Evidence Judge` 段落，追加：
+在 `docs/architecture/agents.md` 中搜索 `Knowledge-First` 或 `Evidence Judge` 段落，追加：
 
 ```markdown
 Evidence Judge 之后叠加 Evidence Coverage Agent（model_assisted）：当 Judge 判定可直答且 top evidence 的 rerankScore>=0.7 时，调用模型判断证据是否真正覆盖原问题需要的答案要素。模型判 not_covered/partial 时覆盖结论为拒绝直答并升级到代码诊断；模型失败降级回 Judge 原结论。该机制防止"相关但不回答"的高分证据误导直答（如 case_4e905fbc）。
@@ -906,7 +906,7 @@ Expected: `Docs lint passed`。
 - [ ] **Step 4: 提交**
 
 ```bash
-git add src/agents/evidence-judge.md docs/agent-design.md
+git add src/agents/evidence-judge.md docs/architecture/agents.md
 git commit -m "docs: document evidence coverage agent in agent design"
 ```
 

@@ -43,7 +43,7 @@
 
 ## 6. Documentation and Final Verification
 
-- [x] 6.1 Update `docs/development-standards.md` and `docs/technical-architecture.md` for the `src/embedding/` and local vector artifact boundaries.
+- [x] 6.1 Update `docs/standards/development.md` and `docs/architecture/overview.md` for the `src/embedding/` and local vector artifact boundaries.
 - [x] 6.2 Update README from zero setup through SiliconFlow key/config, embeddings smoke, knowledge init/update/vector build/search, service run, acceptance checks, and extension notes for rerank/Gemini/Qwen.
 - [x] 6.3 Run `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm test`, focused embedding tests, focused knowledge-vector tests, fake smoke, fake vector build, and OpenSpec status.
 - [x] 6.4 Complete the anti-fake-complete audit in implementation notes and mark tasks only with matching evidence.

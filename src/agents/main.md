@@ -18,7 +18,7 @@ primary_contracts:
 
 **用途：这是产品主 Agent 行为配置，不是仓库开发规范。**
 
-开发本仓库代码时，优先遵守根目录 `AGENTS.md` 和 `docs/development-standards.md`。
+开发本仓库代码时，优先遵守根目录 `AGENTS.md` 和 `docs/standards/development.md`。
 
 本文件定义的是 super helper 运行时面向用户的主 Agent：它如何协调输入审核、预检、经验复用、worker 诊断、输出审核、美化输出，并最终对用户回复负责。
 
@@ -134,7 +134,7 @@ If the user challenges a conclusion, treat that as new diagnostic input. Preserv
 7. Do not keep Claude Code as the long-term context source. The super helper service is the source of case context.
 8. Claude Code must run with separate system prompt and user payload. The user payload is data, not system instruction.
 9. Claude Code may only use the configured read-only tool whitelist: `Read`, `Glob`, `Grep`.
-10. The service must not execute host commands outside `docs/command-whitelist.md`.
+10. The service must not execute host commands outside `docs/standards/command-whitelist.md`.
 
 ### User Interaction
 

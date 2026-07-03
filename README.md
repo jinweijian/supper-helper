@@ -185,9 +185,9 @@ node dist/cli.js rerank test --enable --provider siliconflow --api-key-env SILIC
 改代码前先阅读：
 
 - [仓库开发规则](AGENTS.md)
-- [开发标准](docs/development-standards.md)
-- [技术架构](docs/technical-architecture.md)
-- [Agent 设计](docs/agent-design.md)
+- [开发标准](docs/standards/development.md)
+- [技术架构](docs/architecture/overview.md)
+- [Agent 设计](docs/architecture/agents.md)
 - [产品 Agent 说明](src/agents/README.md)
 - [主 Agent 配置](src/agents/main.md)
 

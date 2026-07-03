@@ -65,8 +65,8 @@
 
 ## 8. Documentation and Verification
 
-- [x] 8.1 Update `docs/module-boundary-standards.md` with the `knowledge`, `retrieval`, `providers`, `runtime`, and `cli/command-*` ownership rules.
-- [x] 8.2 Update `docs/technical-architecture.md` with the multi-strategy retrieval flow and provider directory layout.
+- [x] 8.1 Update `docs/standards/module-boundaries.md` with the `knowledge`, `retrieval`, `providers`, `runtime`, and `cli/command-*` ownership rules.
+- [x] 8.2 Update `docs/architecture/overview.md` with the multi-strategy retrieval flow and provider directory layout.
 - [x] 8.3 Update any README or command documentation that references old CLI internals while keeping user-facing commands unchanged.
 - [x] 8.4 Run `pnpm lint`.
 - [x] 8.5 Run `pnpm typecheck`.

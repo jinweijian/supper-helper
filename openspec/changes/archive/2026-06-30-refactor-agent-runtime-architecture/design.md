@@ -160,7 +160,7 @@ This order keeps behavior stable and gives rollback points after each module ext
 5. Extract request/context/review/presentation helpers from `src/agent.ts` into `src/runtime/*` and `src/sessions/*`.
 6. Introduce `DiagnosticRuntime` and adapt `SuperHelperAgent` to delegate to it.
 7. Run `pnpm test` after each extraction group.
-8. Update `docs/technical-architecture.md` and `docs/agent-design.md` after the code structure exists.
+8. Update `docs/architecture/overview.md` and `docs/architecture/agents.md` after the code structure exists.
 
 Rollback strategy: each extraction should preserve public exports or keep a compatibility re-export. If a step fails, revert only that extraction group and keep previous groups that still pass tests.
 

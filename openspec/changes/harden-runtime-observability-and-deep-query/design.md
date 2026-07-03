@@ -20,7 +20,7 @@
 - `src/gateway/dto.ts:5-8,79-94` 在 DTO 序列化中编排 `buildKnowledgeHealthSummary + createConfiguredKnowledgeRetriever`；`src/gateway/routes/knowledge-routes.ts:3-9,30-88` route handler 直接编排 knowledge health/init/reindex；`src/gateway/application-context.ts:2,5` gateway 层 `new ClaudeCodeWorker()` 知道具体 worker 实现。
 
 **约束**：
-- `AGENTS.md`、`docs/development-standards.md`、`docs/module-boundary-standards.md` 是硬合同。
+- `AGENTS.md`、`docs/standards/development.md`、`docs/standards/module-boundaries.md` 是硬合同。
 - case JSON shape 必须保持可读，旧 case 仍可加载。
 - HTTP response shape 和 `/api/knowledge/*` 行为必须兼容。
 - 默认测试不联网、不花钱、不依赖真实凭证。
@@ -161,7 +161,7 @@
 **验证要求**：
 - 每个 Phase 完成后运行 `pnpm lint && pnpm typecheck && pnpm build && pnpm test`。
 - 新增 contract test 覆盖：日志 redaction、evidence 引用化、phase 同步、deep query planner 适配、模块边界迁移。
-- 更新 `docs/development-standards.md`、`docs/module-boundary-standards.md`、`docs/technical-architecture.md`。
+- 更新 `docs/standards/development.md`、`docs/standards/module-boundaries.md`、`docs/architecture/overview.md`。
 
 ## Open Questions
 

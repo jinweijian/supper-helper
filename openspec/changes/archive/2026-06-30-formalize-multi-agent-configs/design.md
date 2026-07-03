@@ -244,10 +244,10 @@ Alternatives considered:
 Decision:
 
 - `AGENTS.md` remains the repository development instruction file.
-- `docs/development-standards.md` adds `src/agents/` to the module ownership map.
-- `docs/technical-architecture.md` describes main Agent and configured sub-agents as a product architecture concept.
-- `docs/agent-design.md` points to `src/agents/main.md` for the main Agent behavior source.
-- `docs/agent-design.md` documents the initial role pairings for input review/preflight, output review, and presentation.
+- `docs/standards/development.md` adds `src/agents/` to the module ownership map.
+- `docs/architecture/overview.md` describes main Agent and configured sub-agents as a product architecture concept.
+- `docs/architecture/agents.md` points to `src/agents/main.md` for the main Agent behavior source.
+- `docs/architecture/agents.md` documents the initial role pairings for input review/preflight, output review, and presentation.
 - README groups development rules separately from product Agent behavior.
 
 Rationale:
@@ -273,7 +273,7 @@ Rationale:
 
 - [Risk] Runtime file path breaks after TypeScript build because markdown is no longer at root. → Mitigate with path-aware tests and keep path resolution relative to `dist/runtime` and source layout expectations.
 - [Risk] Removing root `AGENT.md` may break docs lint or old tooling that expects it. → Mitigate by updating README, docs lint, and tests in the same change; if a compatibility pointer is temporarily needed, keep it short and non-authoritative.
-- [Risk] Future contributors may still place sub-agent prompts inside runtime or worker modules. → Mitigate by adding `src/agents/` to `AGENTS.md`, `docs/development-standards.md`, and docs lint.
+- [Risk] Future contributors may still place sub-agent prompts inside runtime or worker modules. → Mitigate by adding `src/agents/` to `AGENTS.md`, `docs/standards/development.md`, and docs lint.
 - [Risk] The term "sub-agent" may be confused with Claude Code worker. → Mitigate by documenting that sub-agents are product reasoning roles and workers are external diagnostic tools.
 - [Risk] The registry can drift from actual runtime usage. → Mitigate with tests that assert initial stage mappings and runtime prompt loading from the registry.
 - [Risk] Adding stage-specific configs could duplicate main Agent rules. → Mitigate by making sub-agent configs narrow and requiring the main Agent evidence contract to remain authoritative.

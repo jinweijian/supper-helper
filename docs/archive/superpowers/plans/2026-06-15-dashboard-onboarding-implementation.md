@@ -72,8 +72,8 @@ src/ui.ts
 src/cli.ts
 package.json
 README.md
-docs/development-standards.md
-docs/technical-architecture.md
+docs/standards/development.md
+docs/architecture/overview.md
 test/knowledge.test.mjs
 test/embedding.test.mjs
 test/supper-helper.test.mjs
@@ -2494,8 +2494,8 @@ git commit -m "feat: add onboard dashboard and status commands"
 **Files:**
 - Modify: `package.json`
 - Modify: `README.md`
-- Modify: `docs/development-standards.md`
-- Modify: `docs/technical-architecture.md`
+- Modify: `docs/standards/development.md`
+- Modify: `docs/architecture/overview.md`
 
 - [ ] **Step 1: 增加源码态命令**
 
@@ -2547,13 +2547,13 @@ README 明确：
 
 - [ ] **Step 3: 更新模块边界文档**
 
-`docs/development-standards.md` 的 ownership map 增加：
+`docs/standards/development.md` 的 ownership map 增加：
 
 ```text
 src/onboarding/ | Setup 草稿、run、进度、恢复和配置提交 | HTTP、产品诊断编排、provider 实现
 ```
 
-`docs/technical-architecture.md` 增加 onboarding pipeline、SSE、SecretRef、LAN MVP 边界和 CLI 契约。
+`docs/architecture/overview.md` 增加 onboarding pipeline、SSE、SecretRef、LAN MVP 边界和 CLI 契约。
 
 - [ ] **Step 4: 运行文档校验**
 
@@ -2568,7 +2568,7 @@ Expected: `Docs lint passed...`
 - [ ] **Step 5: 提交**
 
 ```bash
-git add package.json README.md docs/development-standards.md docs/technical-architecture.md
+git add package.json README.md docs/standards/development.md docs/architecture/overview.md
 git commit -m "docs: make dashboard onboarding the default setup"
 ```
 

@@ -38,8 +38,8 @@
 
 ## 6. Policy And Architecture Documentation
 
-- [x] 6.1 Update `AGENTS.md` and `docs/module-boundary-standards.md`: remove mandates to preserve old source facades; define one canonical path and require consumer、owner、expiry、migration task and boundary test for any future exception. Completion evidence: no rule asks developers to keep deleted aliases.
-- [x] 6.2 Update `docs/development-standards.md` and `docs/technical-architecture.md` with the current Parent-Child/Hybrid/strict-evidence path, canonical entrypoints and source-vs-data migration distinction. Completion evidence: no current-architecture section mentions embedding compatibility、legacy RAG、keyword compatibility or deleted root/CLI aliases.
+- [x] 6.1 Update `AGENTS.md` and `docs/standards/module-boundaries.md`: remove mandates to preserve old source facades; define one canonical path and require consumer、owner、expiry、migration task and boundary test for any future exception. Completion evidence: no rule asks developers to keep deleted aliases.
+- [x] 6.2 Update `docs/standards/development.md` and `docs/architecture/overview.md` with the current Parent-Child/Hybrid/strict-evidence path, canonical entrypoints and source-vs-data migration distinction. Completion evidence: no current-architecture section mentions embedding compatibility、legacy RAG、keyword compatibility or deleted root/CLI aliases.
 - [x] 6.3 Update README/package command examples to advertise only `retrieval search|debug|eval` for query/debug/evaluation; preserve knowledge ingestion、vector build、audit、review、publish and migration-report commands. Completion evidence: docs lint passes and stale-command scan excludes archived historical artifacts only.
 
 ## 7. Anti-Fake-Complete Audit / 回头重新思考

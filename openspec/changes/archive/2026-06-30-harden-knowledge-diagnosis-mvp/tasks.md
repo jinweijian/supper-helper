@@ -1,6 +1,6 @@
 ## 1. Planning and Guardrails
 
-- [x] 1.1 Read `openspec/changes/harden-knowledge-diagnosis-mvp/proposal.md`, `design.md`, `specs/knowledge-diagnosis-hardening/spec.md`, `docs/development-standards.md`, `docs/technical-architecture.md`, `docs/agent-design.md`, `src/agents/README.md`, and `src/agents/main.md` before coding; do not start implementation until module ownership is clear.
+- [x] 1.1 Read `openspec/changes/harden-knowledge-diagnosis-mvp/proposal.md`, `design.md`, `specs/knowledge-diagnosis-hardening/spec.md`, `docs/standards/development.md`, `docs/architecture/overview.md`, `docs/architecture/agents.md`, `src/agents/README.md`, and `src/agents/main.md` before coding; do not start implementation until module ownership is clear.
 - [x] 1.2 Confirm implementation scope excludes BM25, vector retrieval, hybrid/RRF, reranker, and GraphRAG; if a task appears to require those, update OpenSpec instead of implementing them.
 - [x] 1.3 Confirm no business decision is added to `src/gateway/`; gateway changes, if any, must only validate HTTP input, call runtime methods, and serialize DTOs.
 - [x] 1.4 Confirm no knowledge search, quality audit, or review workflow logic is added to `src/workers/` or `src/workers/claude/`; workers remain read-only diagnostic tools.
@@ -9,9 +9,9 @@
 
 ## 2. Documentation Baseline
 
-- [x] 2.1 Update `docs/technical-architecture.md` runtime pipeline to show current flow: Experience -> Preflight -> Knowledge Router/Search/Evidence Judge -> knowledge direct answer or Claude Code escalation -> Output Review -> Presentation -> optional Case Curator.
-- [x] 2.2 Remove or rewrite any `docs/technical-architecture.md` statement saying knowledge runtime integration is future-only; replace it with current implemented behavior and this change's hardening roadmap.
-- [x] 2.3 Update `docs/agent-design.md` `Knowledge-First Skeleton` section to describe the existing wired runtime stages, including Knowledge Router, Evidence Judge, Deep Query Planner, Query Correction, and Case Curator.
+- [x] 2.1 Update `docs/architecture/overview.md` runtime pipeline to show current flow: Experience -> Preflight -> Knowledge Router/Search/Evidence Judge -> knowledge direct answer or Claude Code escalation -> Output Review -> Presentation -> optional Case Curator.
+- [x] 2.2 Remove or rewrite any `docs/architecture/overview.md` statement saying knowledge runtime integration is future-only; replace it with current implemented behavior and this change's hardening roadmap.
+- [x] 2.3 Update `docs/architecture/agents.md` `Knowledge-First Skeleton` section to describe the existing wired runtime stages, including Knowledge Router, Evidence Judge, Deep Query Planner, Query Correction, and Case Curator.
 - [x] 2.4 Add a documentation section for quality reports: expected path `knowledge/indexes/chunk-quality-report.json`, report fields, severity meanings, and default warn-vs-strict behavior.
 - [x] 2.5 Add a documentation section for live acceptance: command name, expected prerequisites, report output path, redaction guarantees, and how to interpret failures.
 - [x] 2.6 Add a documentation section for solved case review lifecycle: `review_required`, `active`, rejected/request-edits states, unresolved conversion, dirty flag behavior, and reviewer metadata.

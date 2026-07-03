@@ -323,7 +323,7 @@ The system documentation SHALL accurately describe the current knowledge-first r
 
 #### Scenario: Runtime docs updated
 - **WHEN** this change is implemented
-- **THEN** `docs/technical-architecture.md`, `docs/agent-design.md`, and related developer docs no longer state that knowledge runtime integration is only future work
+- **THEN** `docs/architecture/overview.md`, `docs/architecture/agents.md`, and related developer docs no longer state that knowledge runtime integration is only future work
 
 #### Scenario: Acceptance docs added
 - **WHEN** live acceptance tooling is implemented

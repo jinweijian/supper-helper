@@ -52,9 +52,9 @@ This change makes Agent configuration a first-class product concept: runtime Age
   - `src/domain.ts`
   - `src/storage.ts`
   - `src/ui.ts`
-  - `docs/development-standards.md`
-  - `docs/technical-architecture.md`
-  - `docs/agent-design.md`
+  - `docs/standards/development.md`
+  - `docs/architecture/overview.md`
+  - `docs/architecture/agents.md`
   - `README.md`
   - `scripts/verify-docs.mjs`
   - runtime and docs tests in `test/super-helper.test.mjs`
