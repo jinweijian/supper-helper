@@ -6,6 +6,7 @@ import {
   reindexKnowledgeWorkspace,
 } from '../../knowledge/health-service.js';
 import { readJson, sendJson } from '../http-utils.js';
+import { resolveConfiguredWorkspaceId } from '../request-contracts.js';
 
 type KnowledgeActionBody = {
   workspaceId?: string;
@@ -19,11 +20,7 @@ export async function handleKnowledgeRoutes(
   config: SuperHelperConfig,
 ): Promise<boolean> {
   if (req.method === 'GET' && url.pathname === '/api/knowledge/health') {
-    const workspaceId = resolveWorkspaceId(config, url.searchParams.get('workspaceId') ?? undefined);
-    if (!workspaceId) {
-      sendJson(res, 400, { error: 'workspaceId is required' });
-      return true;
-    }
+    const workspaceId = resolveConfiguredWorkspaceId(config, url.searchParams.get('workspaceId'));
 
     sendJson(res, 200, {
       ok: true,
@@ -39,11 +36,7 @@ export async function handleKnowledgeRoutes(
 
   if (req.method === 'POST' && url.pathname === '/api/knowledge/bind') {
     const body = (await readJson(req)) as KnowledgeActionBody;
-    const workspaceId = resolveWorkspaceId(config, body.workspaceId);
-    if (!workspaceId) {
-      sendJson(res, 400, { error: 'workspaceId is required' });
-      return true;
-    }
+    const workspaceId = resolveConfiguredWorkspaceId(config, body.workspaceId);
 
     const init = bindKnowledgeWorkspace({ config, workspaceId });
     sendJson(res, 200, {
@@ -61,11 +54,7 @@ export async function handleKnowledgeRoutes(
 
   if (req.method === 'POST' && url.pathname === '/api/knowledge/reindex') {
     const body = (await readJson(req)) as KnowledgeActionBody;
-    const workspaceId = resolveWorkspaceId(config, body.workspaceId);
-    if (!workspaceId) {
-      sendJson(res, 400, { error: 'workspaceId is required' });
-      return true;
-    }
+    const workspaceId = resolveConfiguredWorkspaceId(config, body.workspaceId);
 
     const update = reindexKnowledgeWorkspace({ config, workspaceId });
     sendJson(res, 200, {
@@ -82,12 +71,4 @@ export async function handleKnowledgeRoutes(
   }
 
   return false;
-}
-
-function resolveWorkspaceId(config: SuperHelperConfig, workspaceId?: string): string | undefined {
-  const requested = workspaceId?.trim() || config.workspaces[0]?.id;
-  if (!requested) {
-    return undefined;
-  }
-  return config.workspaces.some((workspace) => workspace.id === requested) ? requested : undefined;
 }

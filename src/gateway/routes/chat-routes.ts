@@ -4,6 +4,7 @@ import { estimateCaseContextUsage } from '../../context-window.js';
 import type { UserPersona } from '../../domain.js';
 import type { DiagnosticRuntime } from '../../runtime/diagnostic-runtime.js';
 import { readJson, sendJson } from '../http-utils.js';
+import { assertChatMessageSize, requireCaseId, resolveConfiguredWorkspaceId } from '../request-contracts.js';
 
 export async function handleChatRoutes(
   req: IncomingMessage,
@@ -27,8 +28,11 @@ export async function handleChatRoutes(
     sendJson(res, 400, { error: 'message is required' });
     return true;
   }
-  if (body.caseId) {
-    const existing = agent.loadCase?.(body.caseId);
+  assertChatMessageSize(body.message);
+  const caseId = body.caseId ? requireCaseId(body.caseId) : undefined;
+  const workspaceId = resolveConfiguredWorkspaceId(config, body.workspaceId);
+  if (caseId) {
+    const existing = agent.loadCase?.(caseId);
     if (existing?.archivedAt) {
       sendJson(res, 409, { error: 'session is archived and cannot continue' });
       return true;
@@ -37,9 +41,9 @@ export async function handleChatRoutes(
 
   if (body.async) {
     const turn = agent.startUserTurn({
-      caseId: body.caseId,
+      caseId,
       message: body.message,
-      workspaceId: body.workspaceId,
+      workspaceId,
       persona: body.persona,
     });
     const caseSession = turn.caseSession;
@@ -61,9 +65,9 @@ export async function handleChatRoutes(
   }
 
   const response = await agent.handleUserMessage({
-    caseId: body.caseId,
+    caseId,
     message: body.message,
-    workspaceId: body.workspaceId,
+    workspaceId,
     persona: body.persona,
   });
 

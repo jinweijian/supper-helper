@@ -3,6 +3,7 @@ import type { CaseRepository } from '../../sessions/case-repository.js';
 import { buildLogBlocks, formatLogSection } from '../../observability/log-blocks.js';
 import { sanitizeWorkerTrace } from '../../observability/worker-trace.js';
 import { sendJson } from '../http-utils.js';
+import { requireCaseId } from '../request-contracts.js';
 
 export async function handleLogRoutes(
   req: IncomingMessage,
@@ -14,11 +15,7 @@ export async function handleLogRoutes(
     return false;
   }
 
-  const caseId = url.searchParams.get('caseId');
-  if (!caseId) {
-    sendJson(res, 400, { error: 'caseId is required' });
-    return true;
-  }
+  const caseId = requireCaseId(url.searchParams.get('caseId'));
 
   const caseSession = store.loadCase(caseId);
   if (!caseSession) {

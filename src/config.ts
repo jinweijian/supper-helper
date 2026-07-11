@@ -96,6 +96,24 @@ export interface SuperHelperConfig {
   };
 }
 
+export class InvalidWorkspaceIdError extends Error {
+  constructor() {
+    super('invalid workspaceId');
+    this.name = 'InvalidWorkspaceIdError';
+  }
+}
+
+export function configuredWorkspaceId(
+  config: SuperHelperConfig,
+  requested?: string | null,
+): string {
+  const workspaceId = requested?.trim() || config.workspaces[0]?.id;
+  if (!workspaceId || !config.workspaces.some((workspace) => workspace.id === workspaceId)) {
+    throw new InvalidWorkspaceIdError();
+  }
+  return workspaceId;
+}
+
 const DEFAULT_HOME = join(homedir(), '.super-helper');
 
 export function defaultConfig(): SuperHelperConfig {

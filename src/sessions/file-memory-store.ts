@@ -1,16 +1,52 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { CaseMessage, DiagnosticLogEvent, DiagnosticRun } from '../domain.js';
 import type { CaseRepository, StoredCase } from './case-repository.js';
+import { resolveContainedCasePath } from './case-identifier.js';
 
 export type { StoredCase } from './case-repository.js';
 
+export interface AtomicFileOperations {
+  openSync: typeof openSync;
+  writeFileSync: typeof writeFileSync;
+  fsyncSync: typeof fsyncSync;
+  closeSync: typeof closeSync;
+  renameSync: typeof renameSync;
+  unlinkSync: typeof unlinkSync;
+}
+
+export interface FileMemoryStoreOptions {
+  fileOperations?: Partial<AtomicFileOperations>;
+}
+
+const DEFAULT_FILE_OPERATIONS: AtomicFileOperations = {
+  openSync,
+  writeFileSync,
+  fsyncSync,
+  closeSync,
+  renameSync,
+  unlinkSync,
+};
+
 export class FileMemoryStore implements CaseRepository {
   readonly rootDir: string;
+  private readonly fileOperations: AtomicFileOperations;
 
-  constructor(rootDir: string) {
+  constructor(rootDir: string, options: FileMemoryStoreOptions = {}) {
     this.rootDir = rootDir;
+    this.fileOperations = { ...DEFAULT_FILE_OPERATIONS, ...options.fileOperations };
     this.ensure();
   }
 
@@ -32,7 +68,7 @@ export class FileMemoryStore implements CaseRepository {
   }
 
   casePath(caseId: string): string {
-    return join(this.casesDir, `${caseId}.json`);
+    return resolveContainedCasePath(this.casesDir, caseId);
   }
 
   createCase(input: {
@@ -91,7 +127,7 @@ export class FileMemoryStore implements CaseRepository {
       migrated = true;
     }
     if (migrated) {
-      writeFileSync(path, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+      this.writeCaseFile(parsed);
     }
     return parsed;
   }
@@ -122,7 +158,7 @@ export class FileMemoryStore implements CaseRepository {
 
   saveCase(caseSession: StoredCase): void {
     caseSession.updatedAt = new Date().toISOString();
-    writeFileSync(this.casePath(caseSession.id), `${JSON.stringify(caseSession, null, 2)}\n`, 'utf8');
+    this.writeCaseFile(caseSession);
   }
 
   addMessage(caseSession: StoredCase, message: Omit<CaseMessage, 'id' | 'createdAt'>): CaseMessage {
@@ -192,5 +228,37 @@ export class FileMemoryStore implements CaseRepository {
       ? readFileSync(this.dailyMemoryPath, 'utf8')
       : `# super helper memory ${new Date().toISOString().slice(0, 10)}\n\n`;
     writeFileSync(this.dailyMemoryPath, `${existing}${line}\n`, 'utf8');
+  }
+
+  private writeCaseFile(caseSession: StoredCase): void {
+    const targetPath = this.casePath(caseSession.id);
+    const temporaryPath = join(this.casesDir, `.${caseSession.id}.${randomUUID()}.tmp`);
+    const serialized = `${JSON.stringify(caseSession, null, 2)}\n`;
+    let fileDescriptor: number | undefined;
+
+    try {
+      fileDescriptor = this.fileOperations.openSync(temporaryPath, 'wx', 0o600);
+      this.fileOperations.writeFileSync(fileDescriptor, serialized, 'utf8');
+      this.fileOperations.fsyncSync(fileDescriptor);
+      this.fileOperations.closeSync(fileDescriptor);
+      fileDescriptor = undefined;
+      this.fileOperations.renameSync(temporaryPath, targetPath);
+    } catch (error) {
+      if (fileDescriptor !== undefined) {
+        try {
+          this.fileOperations.closeSync(fileDescriptor);
+        } catch {
+          // Preserve the original write error.
+        }
+      }
+      if (existsSync(temporaryPath)) {
+        try {
+          this.fileOperations.unlinkSync(temporaryPath);
+        } catch {
+          // Preserve the original write error.
+        }
+      }
+      throw error;
+    }
   }
 }

@@ -1,20 +1,48 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { InvalidJsonBodyError, PayloadTooLargeError } from './errors.js';
+
+export const MAX_JSON_BODY_BYTES = 1_048_576;
 
 export function readJson(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    let data = '';
-    req.setEncoding('utf8');
-    req.on('data', (chunk) => {
-      data += chunk;
+    const declaredLength = Number(req.headers['content-length']);
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_JSON_BODY_BYTES) {
+      req.resume();
+      reject(new PayloadTooLargeError());
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    let settled = false;
+
+    req.on('data', (chunk: Buffer | string) => {
+      if (settled) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buffer.length;
+      if (totalBytes > MAX_JSON_BODY_BYTES) {
+        settled = true;
+        req.resume();
+        reject(new PayloadTooLargeError());
+        return;
+      }
+      chunks.push(buffer);
     });
     req.on('end', () => {
+      if (settled) return;
+      settled = true;
       try {
+        const data = Buffer.concat(chunks, totalBytes).toString('utf8');
         resolve(data ? JSON.parse(data) : {});
-      } catch (error) {
-        reject(error);
+      } catch {
+        reject(new InvalidJsonBodyError());
       }
     });
-    req.on('error', reject);
+    req.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
   });
 }
 

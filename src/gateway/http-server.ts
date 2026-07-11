@@ -4,6 +4,7 @@ import { FileSecretsRepository, createOnboardingService, materializeConfigSecret
 import { renderSetupApp } from '../setup-ui.js';
 import { renderApp } from '../ui.js';
 import { sendHtml, sendJson, sendRedirect } from './http-utils.js';
+import { sendGatewayError } from './errors.js';
 import { GatewayApplicationContext } from './application-context.js';
 import { createDefaultDiagnosticWorker, type DiagnosticWorkerFactory } from '../workers/default-worker-factory.js';
 import { handleChatRoutes } from './routes/chat-routes.js';
@@ -18,6 +19,7 @@ export interface StartServerOptions {
   config: SuperHelperConfig;
   onboarding?: OnboardingService;
   workerFactory?: DiagnosticWorkerFactory;
+  onInternalError?: (message: string) => void;
 }
 
 export interface StartedServer {
@@ -43,8 +45,7 @@ export function startServer(options: StartServerOptions): Promise<StartedServer>
     try {
       await route(req, res, context, onboarding, secrets);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      sendJson(res, 500, { error: message });
+      sendGatewayError(res, error, options.onInternalError ?? console.error);
     }
   });
 

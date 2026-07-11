@@ -1,4 +1,4 @@
-import type { SuperHelperConfig } from '../config.js';
+import { configuredWorkspaceId, type SuperHelperConfig } from '../config.js';
 import type { UserPersona } from '../domain.js';
 import type { CaseRepository, StoredCase } from '../sessions/case-repository.js';
 import type { AcceptedUserTurn } from './contracts.js';
@@ -87,7 +87,7 @@ export class SessionLifecycle {
       }
     }
 
-    const workspaceId = input.workspaceId ?? this.config.workspaces[0]?.id ?? 'current';
+    const workspaceId = configuredWorkspaceId(this.config, input.workspaceId);
     return this.store.createCase({
       tenantId: 'local',
       userId: 'local-user',
