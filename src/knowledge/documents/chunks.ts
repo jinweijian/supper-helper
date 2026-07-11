@@ -4,29 +4,10 @@ import { chunksPath, dirtyFlagPath } from '../paths.js';
 import type { KnowledgeChunk, KnowledgeDocument } from '../types.js';
 import { extractKnowledgeTerms } from './terms.js';
 
-export interface KnowledgeChunkingOptions {
-  maxChars?: number;
-  overlapStrategy?: 'sentence' | 'sliding';
-  overlapChars?: number;
-  minChars?: number;
-}
-
-interface NormalizedChunkingOptions {
-  maxChars: number;
-  overlapStrategy: 'sentence' | 'sliding';
-  overlapChars: number;
-  minChars: number;
-}
-
-const DEFAULT_CHUNKING_OPTIONS: NormalizedChunkingOptions = {
-  maxChars: 800,
-  overlapStrategy: 'sentence',
-  overlapChars: 120,
-  minChars: 80,
-};
-
-const CURRENT_CHUNKING_STRATEGY = 'parent-child-v3';
-const CURRENT_ARTIFACT_VERSION = 3;
+import { lastBoundedCompleteSentence, markLegacyChunk, normalizeChunkingOptions, overlapText, positiveInteger, slug, sourceBlocksForChild, splitIntoSentences, stripMarkdown, windowOverlap } from './chunk-utils.js';
+export { markLegacyChunk } from './chunk-utils.js';
+import { CURRENT_ARTIFACT_VERSION, CURRENT_CHUNKING_STRATEGY, type KnowledgeChunkingOptions, type NormalizedChunkingOptions } from './chunk-contracts.js';
+export type { KnowledgeChunkingOptions, NormalizedChunkingOptions } from './chunk-contracts.js';
 
 export function loadKnowledgeChunksForSearch(
   workspaceRoot: string,
@@ -257,75 +238,4 @@ function splitLongBlock(
   }
   flush();
   return children;
-}
-
-function splitIntoSentences(text: string): string[] {
-  return (text.replace(/\r\n/g, '\n').match(/[^。！？!?;；.\n]+(?:[。！？!?;；.]|\n+|$)/g) ?? [])
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
-}
-
-function overlapText(text: string, options: NormalizedChunkingOptions): string | undefined {
-  if (options.overlapChars <= 0) return undefined;
-  if (options.overlapStrategy === 'sliding') {
-    const overlap = text.slice(-options.overlapChars).trim();
-    return overlap || undefined;
-  }
-  const sentence = lastBoundedCompleteSentence(text, options.overlapChars);
-  return sentence && sentence.length <= options.overlapChars ? sentence : undefined;
-}
-
-function windowOverlap(window: string[], options: NormalizedChunkingOptions): string {
-  if (options.overlapChars <= 0 || window.length === 0) return '';
-  if (options.overlapStrategy === 'sliding') {
-    return window.join('').slice(-options.overlapChars).trim();
-  }
-  const sentence = window.at(-1)?.trim() ?? '';
-  return sentence.length <= options.overlapChars ? sentence : '';
-}
-
-function lastBoundedCompleteSentence(text: string, maxChars: number): string | undefined {
-  const sentences = text.match(/[^。！？!?;；.]+[。！？!?;；.]/g) ?? [];
-  const sentence = sentences.at(-1)?.trim();
-  return sentence && sentence.length <= maxChars ? sentence : undefined;
-}
-
-function normalizeChunkingOptions(options?: KnowledgeChunkingOptions): NormalizedChunkingOptions {
-  const maxChars = positiveInteger(options?.maxChars, DEFAULT_CHUNKING_OPTIONS.maxChars);
-  return {
-    maxChars,
-    overlapStrategy: options?.overlapStrategy === 'sliding' ? 'sliding' : 'sentence',
-    overlapChars: Math.min(positiveInteger(options?.overlapChars, DEFAULT_CHUNKING_OPTIONS.overlapChars), maxChars),
-    minChars: Math.min(positiveInteger(options?.minChars, DEFAULT_CHUNKING_OPTIONS.minChars), maxChars),
-  };
-}
-
-function positiveInteger(value: number | undefined, fallback: number): number {
-  return Number.isFinite(value) && value && value > 0 ? Math.floor(value) : fallback;
-}
-
-function sourceBlocksForChild(sourceBlockIds: string[], blockIndexes: number[]): string[] {
-  if (sourceBlockIds.length === 0) return [];
-  // Parent Markdown 没有保留无损的 block-to-paragraph 标记；保留完整父级溯源，
-  // 避免猜测一个看似更精确、实际无法证明的子集。
-  void blockIndexes;
-  return Array.from(new Set(sourceBlockIds));
-}
-
-function stripMarkdown(body: string): string {
-  return body
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/`{1,3}/g, '')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .trim();
-}
-
-function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'chunk';
-}
-
-export function markLegacyChunk(chunk: KnowledgeChunk): KnowledgeChunk {
-  const current = chunk.artifact_version === CURRENT_ARTIFACT_VERSION
-    && chunk.chunking_strategy === CURRENT_CHUNKING_STRATEGY;
-  return { ...chunk, legacy: chunk.legacy ?? !current };
 }

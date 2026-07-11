@@ -76,6 +76,13 @@ export {
   rejectSolvedCase,
   requestSolvedCaseEdits,
 } from './case-review.js';
+export {
+  importRedmineIssueFixture,
+} from './redmine-card.js';
+export type {
+  ImportRedmineIssueFixtureInput,
+  ImportRedmineIssueFixtureResult,
+} from './redmine-card.js';
 export { generateKnowledgeMigrationReport } from './migration.js';
 export type { KnowledgeMigrationReport } from './migration.js';
 export {

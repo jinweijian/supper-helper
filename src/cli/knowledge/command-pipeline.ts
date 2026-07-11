@@ -9,6 +9,7 @@ import {
   loadSourceDocuments,
   normalizeSourceBlocks,
   publishApprovedDraftSlices,
+  importRedmineIssueFixture,
   readKnowledgeRepairPlan,
   readSourceBlocks,
   reviewDraftSlices,
@@ -169,6 +170,25 @@ export async function runKnowledgePipelineCommand(
     for (const batch of report.batches) {
       console.log(`batch ${batch.order}: ${batch.module} status=${batch.status} parents=${batch.parentIds.length}`);
     }
+    return true;
+  }
+
+  if (subcommand === 'redmine' && argv[1] === 'import-fixture') {
+    const issuePath = readOption(argv, '--issue');
+    if (!issuePath) {
+      console.error('Usage: super-helper knowledge redmine import-fixture --issue <issue.json> [--workspace <path>] [--knowledge-root <path>]');
+      process.exit(1);
+    }
+    const result = importRedmineIssueFixture({
+      workspaceRoot,
+      issuePath: resolveSourcePath(process.cwd(), issuePath),
+    });
+    console.log(`redmine imported: issue=${result.issueId}`);
+    console.log(`source: ${result.sourcePath}`);
+    console.log(`card: ${result.cardPath}`);
+    console.log(`status: ${result.status}`);
+    console.log(`coverage: ${result.coverageLevel}`);
+    console.log(`verification: ${result.verificationStatus}`);
     return true;
   }
 

@@ -38,6 +38,7 @@
     "knowledge:publish": "pnpm build && node dist/cli.js knowledge publish",
     "accept:knowledge": "pnpm build && node dist/cli.js accept knowledge",
     "acceptance:mcp:local": "pnpm build && node --test test/mcp-runtime.test.mjs",
+    "acceptance:knowledge:local": "pnpm build && node --test test/knowledge-local-acceptance.test.mjs",
     "typecheck": "tsc --noEmit && vue-tsc --noEmit -p web/tsconfig.json",
     "typecheck:web": "vue-tsc --noEmit -p web/tsconfig.json",
     "lint": "node scripts/verify-docs.mjs",

@@ -6,6 +6,7 @@ import { buildDraftSlices } from './slicer.js';
 import { relativeKnowledgePath, sourcesRoot } from './paths.js';
 import type { KnowledgeIngestReport, KnowledgeSourceDocument } from './types.js';
 
+import { inferModuleFromTitle, safeSlug } from './ingest-naming.js';
 export function defaultSourceDirectory(): string | undefined {
   const path = join(homedir(), 'Documents', 'knowledge');
   return existsSync(path) ? path : undefined;
@@ -291,25 +292,4 @@ function legacyWriteActiveSlicesToFormalTree(input: {
       writeFileSync(target, updated, 'utf8');
     }
   }
-}
-
-function inferModuleFromTitle(title: string, _kind: string): string {
-  const text = title;
-  if (/AI伴学|伴学助手|学习计划|督学提醒|题目答疑/.test(text)) {
-    return 'ai-companion';
-  }
-  if (/EduSoho|教培|课程|班级|学员|教师|网校/.test(text)) {
-    return 'edusoho-training';
-  }
-  return 'general';
-}
-
-function safeSlug(value: string): string {
-  const ascii = value
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return ascii || 'doc';
 }

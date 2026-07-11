@@ -8,6 +8,6 @@ export async function runKnowledgeCommand(argv: string[]): Promise<void> {
   if (await runKnowledgeVectorCommand(argv, context)) return;
   if (await runKnowledgeWorkspaceCommand(argv, context)) return;
   if (await runKnowledgePipelineCommand(argv, context)) return;
-  console.error('Usage: super-helper knowledge <init|update|extract|normalize|slice|audit|repair|review|publish|migration-report|vector build> [--workspace <path>] [--knowledge-root <path>]');
+  console.error('Usage: super-helper knowledge <init|update|extract|normalize|slice|audit|repair|review|publish|migration-report|redmine import-fixture|vector build> [--workspace <path>] [--knowledge-root <path>]');
   process.exit(1);
 }

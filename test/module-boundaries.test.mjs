@@ -432,6 +432,99 @@ test('gateway delegates knowledge health and worker construction to owner servic
   );
 });
 
+test('observability uses neutral redaction utilities instead of provider ownership', () => {
+  assert.equal(existsSync(join(srcRoot, 'redaction.ts')), true, 'src/redaction.ts must own generic secret redaction');
+  assertNoImportPattern(
+    tsFilesUnder(join(srcRoot, 'observability')),
+    [
+      /from\s+['"]\.\.\/providers\/redaction(?:\.js)?['"]/,
+      /\bredactProviderErrorMessage\b/,
+    ],
+    'observability must not depend on provider-owned redaction helpers for generic worker traces',
+  );
+});
+
+test('oversized module split entrypoints preserve public exports and UI output', async () => {
+  const requiredSourceFiles = [
+    'src/ui/index.ts',
+    'src/ui/main-screen.ts',
+    'src/ui/setup-screen.ts',
+    'src/knowledge/quality/index.ts',
+    'src/knowledge/quality/audit.ts',
+    'src/knowledge/quality/report-io.ts',
+    'src/knowledge/quality/gate.ts',
+    'src/knowledge/quality/chunk-map.ts',
+    'src/onboarding/draft-service.ts',
+    'src/onboarding/review-service.ts',
+    'src/onboarding/run-service.ts',
+    'src/onboarding/secrets-service.ts',
+    'src/runtime/event-recorder/index.ts',
+    'src/runtime/event-recorder/conversation.ts',
+    'src/runtime/event-recorder/preflight.ts',
+    'src/runtime/event-recorder/knowledge.ts',
+    'src/runtime/event-recorder/review.ts',
+    'src/runtime/event-recorder/curator.ts',
+    'src/runtime/event-recorder/worker.ts',
+  ];
+  const missing = requiredSourceFiles.filter((path) => !existsSync(join(repoRoot, path)));
+  assert.deepEqual(missing, [], 'oversized modules must be split into responsibility-owned source files');
+
+  for (const facade of [
+    'src/ui.ts',
+    'src/setup-ui.ts',
+    'src/knowledge/quality.ts',
+    'src/runtime/event-recorder.ts',
+  ]) {
+    const source = read(join(repoRoot, facade));
+    assert.ok(source.split(/\r?\n/).length <= 40, `${facade} must stay a thin compatibility entrypoint`);
+  }
+  const onboardingFacade = read(join(repoRoot, 'src/onboarding/service.ts'));
+  assert.ok(
+    onboardingFacade.split(/\r?\n/).length <= 80,
+    'src/onboarding/service.ts must stay a narrow owner-composition facade',
+  );
+
+  const [
+    oldUi,
+    newUi,
+    mainScreen,
+    oldSetupUi,
+    setupScreen,
+    oldQuality,
+    newQuality,
+    qualityAudit,
+    oldOnboarding,
+    onboardingIndex,
+    oldRecorder,
+    newRecorder,
+  ] = await Promise.all([
+    import('../dist/ui.js'),
+    import('../dist/ui/index.js'),
+    import('../dist/ui/main-screen.js'),
+    import('../dist/setup-ui.js'),
+    import('../dist/ui/setup-screen.js'),
+    import('../dist/knowledge/quality.js'),
+    import('../dist/knowledge/quality/index.js'),
+    import('../dist/knowledge/quality/audit.js'),
+    import('../dist/onboarding/service.js'),
+    import('../dist/onboarding/index.js'),
+    import('../dist/runtime/event-recorder.js'),
+    import('../dist/runtime/event-recorder/index.js'),
+  ]);
+
+  assert.equal(oldUi.renderApp, newUi.renderApp);
+  assert.equal(newUi.renderApp, mainScreen.renderApp);
+  assert.match(oldUi.renderApp(), /\/assets\/dashboard-.+\.js/, 'renderApp must return the compiled Vue entry');
+  assert.equal(oldSetupUi.renderSetupApp, setupScreen.renderSetupApp);
+  assert.match(oldSetupUi.renderSetupApp(), /\/assets\/setup-.+\.js/, 'renderSetupApp must return the compiled Vue entry');
+  assert.equal(oldQuality.auditKnowledgeQuality, newQuality.auditKnowledgeQuality);
+  assert.equal(newQuality.auditKnowledgeQuality, qualityAudit.auditKnowledgeQuality);
+  assert.equal(oldQuality.parseMarkdownDocument, newQuality.parseMarkdownDocument);
+  assert.equal(oldOnboarding.OnboardingService, onboardingIndex.OnboardingService);
+  assert.equal(oldOnboarding.createOnboardingService, onboardingIndex.createOnboardingService);
+  assert.equal(oldRecorder.CaseRuntimeEventRecorder, newRecorder.CaseRuntimeEventRecorder);
+});
+
 function safeTsFilesUnder(dir) {
   try {
     return tsFilesUnder(dir);
