@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -216,5 +216,80 @@ test('onboarding SSE emits named progress events and disconnect does not cancel 
     assert.equal(fixture.service.getRun(run.id).status, 'completed');
   } finally {
     await fixture.close();
+  }
+});
+
+test('production onboarding HTTP and SSE traverse focused owners and persist the completed run', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'super-helper-real-http-'));
+  const projectRoot = join(root, 'project');
+  const sourceDir = join(root, 'sources');
+  mkdirSync(projectRoot, { recursive: true });
+  mkdirSync(sourceDir, { recursive: true });
+  writeFileSync(join(sourceDir, 'login.md'), [
+    '# 登录排查',
+    '',
+    '用户无法登录时，应确认账号状态、密码错误次数和认证日志，并根据已审核结果处理。',
+  ].join('\n'), 'utf8');
+  const config = defaultConfig();
+  config.storage.rootDir = root;
+  config.knowledge.rootDir = join(root, 'knowledge-store');
+  config.server.host = '127.0.0.1';
+  config.server.port = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (input, init) => {
+    if (String(input).startsWith('https://api.example.test/')) {
+      return Promise.resolve(new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }));
+    }
+    return originalFetch(input, init);
+  };
+  const server = await startServer({ config });
+  try {
+    const savedResponse = await originalFetch(`${server.url}/api/onboarding/draft`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...draftInputFixture({
+          workspace: { id: 'current', name: 'HTTP Owner', rootPath: projectRoot },
+          knowledge: { rootDir: config.knowledge.rootDir, sourceDir, buildVectorIndex: false },
+          agent: { provider: { baseUrl: 'https://api.example.test/v1', model: 'fixture-model' } },
+          embedding: { enabled: false },
+          rerank: { enabled: false },
+        }),
+        secrets: { agentApiKey: 'http-owner-secret' },
+      }),
+    });
+    assert.equal(savedResponse.status, 200);
+    const saved = await savedResponse.json();
+    assert.equal(saved.draft.agent.provider.hasApiKey, true);
+    assert.equal(JSON.stringify(saved).includes('http-owner-secret'), false);
+
+    const startedResponse = await originalFetch(`${server.url}/api/onboarding/runs`, { method: 'POST' });
+    assert.equal(startedResponse.status, 200);
+    const started = (await startedResponse.json()).run;
+    const events = await originalFetch(`${server.url}/api/onboarding/runs/${started.id}/events`);
+    const reader = events.body.getReader();
+    const firstEvent = new TextDecoder().decode((await reader.read()).value);
+    assert.match(firstEvent, /event: run\.snapshot/);
+    await reader.cancel();
+
+    const deadline = Date.now() + 10_000;
+    let completed;
+    while (Date.now() < deadline) {
+      const body = await originalFetch(`${server.url}/api/onboarding/runs/${started.id}`).then((response) => response.json());
+      if (body.run?.status === 'completed' || body.run?.status === 'failed') {
+        completed = body.run;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(completed?.status, 'completed', completed?.safeError?.message);
+    assert.equal(completed?.overallProgress, 100);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await server.close();
+    rmSync(root, { recursive: true, force: true });
   }
 });

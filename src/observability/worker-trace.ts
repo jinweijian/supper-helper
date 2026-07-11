@@ -1,5 +1,5 @@
 import type { WorkerTrace } from '../domain.js';
-import { redactProviderErrorMessage } from '../providers/redaction.js';
+import { redactSecretText } from '../redaction.js';
 
 export function sanitizeWorkerTrace(trace: WorkerTrace): WorkerTrace {
   return {
@@ -16,5 +16,5 @@ export function sanitizeWorkerTrace(trace: WorkerTrace): WorkerTrace {
 }
 
 function bounded(value: string, limit: number): string {
-  return redactProviderErrorMessage(value).slice(0, limit);
+  return redactSecretText(value).slice(0, limit);
 }

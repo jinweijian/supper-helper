@@ -777,6 +777,9 @@ test('dashboard review state supports pagination, search, and issue explanations
     const issue = firstPage.items[0].issues.find((item) => item.code === 'not_answer_bearing')
       ?? firstPage.items[0].issues[0];
     assert.ok(issue.explanation.reason.includes('原因'));
+    if (issue.code === 'not_answer_bearing') {
+      assert.equal(issue.explanation.reason, '原因：这段内容没有可直接回答用户问题的完整句子。');
+    }
     assert.ok(issue.explanation.impact.includes('影响'));
     assert.ok(issue.explanation.suggestion.includes('建议'));
     assert.ok(Array.isArray(issue.explanation.missingInfo));
