@@ -121,12 +121,11 @@ async function waitFor(assertion, timeoutMs = 2000) {
   throw lastError;
 }
 
-test('composer sends on Enter and keeps Shift+Enter for newline', () => {
+test('dashboard render symbol returns the compiled Vue entry', () => {
   const html = renderApp();
-
-  assert.match(html, /event\.key === 'Enter'/);
-  assert.match(html, /!event\.shiftKey/);
-  assert.match(html, /event\.preventDefault\(\)/);
+  assert.match(html, /<div id="app"><\/div>/);
+  assert.match(html, /\/assets\/dashboard-.+\.js/);
+  assert.doesNotMatch(html, /onclick=/);
 });
 
 test('partial fallback leads with accepted inference instead of generic downgrade summary', () => {
@@ -226,211 +225,6 @@ test('final worker result without claim role and answers is downgraded instead o
     updatedAt: '2026-07-01T00:00:00.000Z',
   });
   assert.equal(summary.status, 'partial');
-});
-
-test('app exposes a model settings and test entry', () => {
-  const html = renderApp();
-
-  assert.match(html, /openSettings\(\)/);
-  assert.match(html, /测试模型/);
-  assert.match(html, /测试 Embedding/);
-  assert.match(html, /测试 Rerank/);
-  assert.match(html, /保存配置/);
-  assert.match(html, /id="embeddingEnabled"/);
-  assert.match(html, /id="rerankEnabled"/);
-  assert.match(html, /id="rerankTopN" type="number" value="8"/);
-  assert.match(html, /rerank\.topN \|\| 8/);
-  assert.match(html, /document\.getElementById\('rerankTopN'\)\.value \|\| 8/);
-  assert.match(html, /enabled: document\.getElementById\('embeddingEnabled'\)\.checked/);
-  assert.match(html, /enabled: document\.getElementById\('rerankEnabled'\)\.checked/);
-  assert.match(html, /payload = readEmbeddingForm\(true\)[\s\S]*payload\.enabled = true/);
-  assert.match(html, /payload = readRerankForm\(true\)[\s\S]*payload\.enabled = true/);
-  assert.match(html, /上下文窗口 Tokens/);
-  assert.match(html, /id="contextWindowTokens"/);
-  assert.match(html, /RAG 可回答性审核/);
-  assert.match(html, /id="useModelForRagAnswerability"/);
-  assert.match(html, /contextWindowTokens: Number\(document\.getElementById\('contextWindowTokens'\)\.value/);
-  assert.match(html, /useModelForRagAnswerability: document\.getElementById\('useModelForRagAnswerability'\)\.checked/);
-});
-
-test('helper answers render concise body with collapsed evidence and claims before evidence', () => {
-  const html = renderApp();
-
-  assert.match(html, /renderHelperMessage/);
-  assert.match(html, /answer-emphasis/);
-  assert.match(html, /answer-section-title/);
-  assert.match(html, /\.msg\.helper strong[\s\S]*font-weight: 850/);
-  assert.match(html, /class="answer-evidence"/);
-  assert.match(html, /查看关键证据/);
-  assert.match(html, /已支持判断/);
-  assert.match(html, /关键证据/);
-  assert.match(html, /findRunResultForMessage/);
-  assert.match(html, /renderAnswerEvidence/);
-  assert.match(html, /splitLegacyEvidenceSections/);
-  assert.match(
-    html,
-    /renderInsightEvidence[\s\S]*已支持判断[\s\S]*证据列表/,
-  );
-});
-
-test('app surfaces interrupted requests and exposes session controls', () => {
-  const html = renderApp();
-
-  assert.match(html, /thinking-indicator/);
-  assert.match(html, /typeWriter/);
-  assert.match(html, /context-meter/);
-  assert.match(html, /pollSessionUntilSettled/);
-  assert.match(html, /catch \(error\)/);
-  assert.match(html, /请求中断/);
-  assert.match(html, /\/api\/sessions/);
-  assert.match(html, /loadSessions\(\)/);
-  assert.match(html, /openSession/);
-  assert.match(html, /toggleSessionMenu/);
-  assert.match(html, /session-menu/);
-  assert.match(html, /更多选项/);
-  assert.match(html, /归档/);
-  assert.match(html, /删除/);
-  assert.match(html, /log-block error/);
-  assert.match(html, /log-block warn/);
-  assert.match(html, /log-block ok/);
-  assert.match(html, /\.msg\.helper pre/);
-  assert.match(html, /preBlocks/);
-  assert.match(html, /escapeHtml\(raw\)/);
-});
-
-test('app switches sessions with lightweight fetches and background refreshes', () => {
-  const html = renderApp();
-
-  assert.match(html, /includeKnowledgeHealth=false/);
-  assert.match(html, /refreshCurrentKnowledgeHealth/);
-  assert.match(html, /loadSessionsInBackground/);
-});
-
-test('app supports shareable session urls that initialize and update case routing', () => {
-  const html = renderApp();
-
-  assert.match(html, /function sessionIdFromLocation/);
-  assert.match(html, /decodeURIComponent\(match\[1\]\)/);
-  assert.match(html, /'\/sessions\/' \+ encodeURIComponent\(id\)/);
-  assert.match(html, /sessionIdFromLocation\(\) \|\| localStorage\.getItem\('super-helper\.caseId'\)/);
-  assert.match(html, /function setSessionRoute/);
-  assert.match(html, /history\.pushState/);
-});
-
-test('history session list keeps its own scroll area instead of compressing items', () => {
-  const html = renderApp();
-
-  assert.match(html, /\.sessions-sidebar[\s\S]*overflow: hidden/);
-  assert.match(html, /\.session-list[\s\S]*overflow-y: auto/);
-  assert.match(html, /\.session-list[\s\S]*flex-direction: column/);
-  assert.match(html, /\.session-item[\s\S]*flex: 0 0 auto/);
-});
-
-test('in-progress card shows live motion and activity-based copy', () => {
-  const html = renderApp();
-
-  assert.match(html, /progressActivityCopy/);
-  assert.match(html, /latestProgressActivity/);
-  assert.match(html, /latestActiveRun/);
-  assert.match(html, /progress-live-dot/);
-  assert.match(html, /progress-running/);
-  assert.match(html, /运行中/);
-  assert.match(html, /progress-sweep/);
-  assert.match(html, /正在运行只读代码排查/);
-  assert.match(html, /正在判断证据是否足够/);
-  assert.match(html, /正在整理可执行答复/);
-  assert.match(html, /normalizeProgressSummary/);
-});
-
-test('chat messages keep pasted code and long commands inside the viewport', () => {
-  const html = renderApp();
-
-  assert.match(html, /\.chat \{[^}]*min-width: 0;[^}]*\}/);
-  assert.match(html, /\.msg \{[^}]*min-width: 0;[^}]*overflow-wrap: anywhere;[^}]*\}/);
-  assert.match(html, /\.msg\.helper pre \{[^}]*max-width: 100%;[^}]*overflow: auto;[^}]*\}/);
-  assert.match(html, /textarea \{[^}]*overflow-wrap: anywhere;[^}]*\}/);
-});
-
-test('app restores in-progress polling after reloading an active session', () => {
-  const html = renderApp();
-
-  assert.match(html, /function restorePendingTurn\(session\)/);
-  assert.match(html, /isSessionInProgress\(session\)/);
-  assert.match(html, /latestPendingUserMessage\(session\.messages \|\| \[\]\)/);
-  assert.match(html, /pollSessionUntilSettled\(pending, session\.id, pendingUserMessage\.id\)/);
-  assert.match(html, /restorePendingTurn\(json\.session\)/);
-});
-
-test('truncated visible metadata exposes title tooltips', () => {
-  const html = renderApp();
-
-  assert.match(html, /workspace\.title = workspaceText/);
-  assert.match(html, /title\.title = titleText/);
-  assert.match(html, /meta\.title = metaText/);
-  assert.match(html, /meter\.title = text\.textContent/);
-  assert.match(html, /class="session-title" title="/);
-  assert.match(html, /class="session-meta" title="/);
-});
-
-test('diagnostic log drawer uses natural-height rows instead of grid-compressed tracks', () => {
-  const html = renderApp();
-
-  assert.doesNotMatch(html, /\.logs \{[^}]*display: grid;[^}]*\}/);
-  assert.match(html, /\.logs \{[^}]*display: flex;[^}]*flex-direction: column;[^}]*\}/);
-  assert.match(html, /\.log-block \{[^}]*flex: 0 0 auto;[^}]*\}/);
-});
-
-test('diagnostic log drawer refreshes only when opened or manually requested', () => {
-  const html = renderApp();
-  const latestLogSummaryBody = html.match(/async function latestLogSummary\(\) \{([\s\S]*?)\n    \}/)?.[1] ?? '';
-
-  assert.match(html, /<button onclick="refreshLogs\(\)">刷新<\/button>/);
-  assert.doesNotMatch(html, /logRefreshTimer/);
-  assert.doesNotMatch(html, /setInterval\(refreshLogs/);
-  assert.doesNotMatch(latestLogSummaryBody, /renderLogs\(json\)/);
-});
-
-test('diagnostic log drawer renders Claude command as a dedicated command block', () => {
-  const html = renderApp();
-
-  assert.match(html, /block\.command/);
-  assert.match(html, /class="log-command"/);
-  assert.match(html, /Claude Code 命令/);
-});
-
-test('diagnostic audit panel exposes knowledge health view affordances', () => {
-  const html = renderApp();
-
-  assert.match(html, /知识健康/);
-  assert.match(html, /renderInsightKnowledgeHealth/);
-  assert.match(html, /服务绑定/);
-  assert.match(html, /索引状态/);
-  assert.match(html, /Embedding/);
-  assert.match(html, /绑定知识库/);
-  assert.match(html, /运行健康检查/);
-  assert.match(html, /\/api\/knowledge\/bind/);
-  assert.match(html, /\/api\/knowledge\/reindex/);
-  assert.match(html, /\/api\/knowledge\/health/);
-  assert.doesNotMatch(html, /这是健康面板动作入口/);
-});
-
-test('composer keeps status chips out of the action row', () => {
-  const html = renderApp();
-
-  assert.match(html, /class="composer-meta status-pills"/);
-  assert.match(html, /class="composer-actions"/);
-  assert.match(html, /class="persona-control"/);
-  assert.match(html, /class="persona-label"/);
-  assert.doesNotMatch(html, /<label>用户视角<select id="personaSelect"/);
-  assert.doesNotMatch(html, /class="composer-row"/);
-  assert.match(
-    html,
-    /<div class="composer-meta status-pills">[\s\S]*Agent 审核[\s\S]*session 复用[\s\S]*<\/div>\s*<div class="composer-actions">[\s\S]*persona-control[\s\S]*sendButton/,
-  );
-  assert.doesNotMatch(html, /<div class="composer-actions">[\s\S]*status-pills[\s\S]*<\/div>/);
-  assert.match(html, /\.composer-meta \{[^}]*display: flex;[^}]*flex-wrap: wrap;[^}]*\}/);
-  assert.match(html, /\.composer-actions \{[^}]*display: flex;[^}]*justify-content: space-between;[^}]*align-items: center;[^}]*\}/);
-  assert.match(html, /\.persona-control \{[^}]*display: inline-flex;[^}]*align-items: center;[^}]*\}/);
 });
 
 test('settings API sanitizes secrets and can test model connectivity', async () => {
@@ -720,7 +514,7 @@ test('shareable session page route serves the chat app shell', async () => {
     assert.equal(res.status, 200);
     assert.match(res.headers.get('content-type') || '', /text\/html/);
     assert.match(html, /super helper/);
-    assert.match(html, /sessionIdFromLocation/);
+    assert.match(html, /\/assets\/dashboard-.+\.js/);
   } finally {
     if (server) {
       await server.close();
@@ -4136,14 +3930,8 @@ test('agents API and settings UI expose configured multi-agent settings', async 
     server = await startServer({ config });
 
     const agents = await fetch('http://127.0.0.1:43979/api/agents').then((res) => res.json());
-    const html = renderApp();
-
     assert.equal(agents.agents.some((agent) => agent.stage === 'experience'), true);
     assert.equal(agents.agents.find((agent) => agent.stage === 'experience').executionMode, 'deterministic');
-    assert.match(html, /id="agentSettings"/);
-    assert.match(html, /\/api\/agents/);
-    assert.match(html, /多 Agent 设置/);
-    assert.match(html, /执行模式/);
   } finally {
     if (server) {
       await server.close();

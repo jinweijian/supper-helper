@@ -47,7 +47,11 @@ export function readJson(req: IncomingMessage): Promise<unknown> {
 }
 
 export function sendHtml(res: ServerResponse, html: string): void {
-  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-cache',
+    'x-content-type-options': 'nosniff',
+  });
   res.end(html);
 }
 

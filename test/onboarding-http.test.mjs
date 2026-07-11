@@ -138,59 +138,11 @@ test('onboarding HTTP API saves draft, starts run, and restores snapshot', async
   }
 });
 
-test('setup UI contains QuickStart, advanced settings, progress, and retry controls', () => {
+test('setup render symbol returns the compiled Vue entry', () => {
   const html = renderSetupApp();
-  assert.match(html, /QuickStart/);
-  assert.match(html, /高级设置/);
-  assert.match(html, /id="topN" type="number" value="8"/);
-  assert.match(html, /检查并执行/);
-  assert.match(html, /EventSource/);
-  assert.match(html, /从失败阶段重试/);
-  assert.match(html, /可信内网/);
-  assert.match(html, /审核知识切片/);
-  assert.match(html, /开始使用/);
-});
-
-test('setup UI exposes paged multi-select review controls', () => {
-  const html = renderSetupApp();
-  assert.match(html, /id="reviewSeverity"/);
-  assert.match(html, /id="reviewSearch"/);
-  assert.match(html, /id="reviewPrevButton"/);
-  assert.match(html, /id="reviewNextButton"/);
-  assert.match(html, /id="selectReviewPageButton"/);
-  assert.match(html, /id="clearReviewSelectionButton"/);
-  assert.match(html, /id="acceptSelectedReviewButton"/);
-  assert.match(html, /id="requestEditsReviewButton"/);
-  assert.match(html, /id="rejectReviewButton"/);
-  assert.match(html, /发布选中/);
-  assert.match(html, /退回修改/);
-  assert.match(html, /不发布选中/);
-});
-
-test('setup UI hydrates form fields from onboarding draft snapshot', () => {
-  const html = renderSetupApp();
-  assert.match(html, /hydrateDraft\(snapshot\.draft\)/);
-  assert.match(html, /function hydrateDraft\(draft\)/);
-  assert.match(html, /\$\('workspacePath'\)\.value = draft\.workspace\?\.rootPath/);
-  assert.match(html, /\$\('agentBaseUrl'\)\.value = draft\.agent\?\.provider\?\.baseUrl/);
-  assert.match(html, /\$\('agentKey'\)\.placeholder = draft\.agent\?\.provider\?\.hasApiKey/);
-});
-
-test('setup UI exposes the renamed path labels and directory picker buttons', () => {
-  const html = renderSetupApp();
-  assert.match(html, /项目目录/);
-  assert.match(html, /知识库目录/);
-  assert.match(html, /知识源目录/);
-  assert.match(html, /id="workspacePath"/);
-  assert.match(html, /id="knowledgeRoot"/);
-  assert.match(html, /id="sourceDir"/);
-  assert.match(html, /class="pathBrowse secondary"[\s\S]*?data-target="workspacePath"/);
-  assert.match(html, /class="pathBrowse secondary"[\s\S]*?data-target="knowledgeRoot"/);
-  assert.match(html, /class="pathBrowse secondary"[\s\S]*?data-target="sourceDir"/);
-  assert.match(html, /\/api\/fs\/dirs/);
-  assert.match(html, /placeholder="被 super helper 管理的代码根目录/);
-  assert.match(html, /placeholder="知识库输出根目录/);
-  assert.match(html, /placeholder="放你的产品\/技术文档的地方/);
+  assert.match(html, /<div id="app"><\/div>/);
+  assert.match(html, /\/assets\/setup-.+\.js/);
+  assert.doesNotMatch(html, /onclick=/);
 });
 
 test('root redirects to setup until onboarding is completed', async () => {

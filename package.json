@@ -16,8 +16,9 @@
     "package.json"
   ],
   "scripts": {
+    "prebuild": "node scripts/check-node-version.mjs",
     "clean": "rm -rf dist",
-    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && vite build && tsc -p tsconfig.build.json",
     "dev": "pnpm build && node dist/cli.js dev",
     "start": "pnpm build && node dist/cli.js dashboard",
     "onboard": "pnpm build && node dist/cli.js onboard",
@@ -25,6 +26,7 @@
     "dashboard": "pnpm build && node dist/cli.js dashboard",
     "status": "pnpm build && node dist/cli.js status",
     "doctor": "pnpm build && node dist/cli.js doctor",
+    "predoctor": "node scripts/check-node-version.mjs",
     "knowledge:init": "pnpm build && node dist/cli.js knowledge init",
     "knowledge:update": "pnpm build && node dist/cli.js knowledge update",
     "knowledge:extract": "pnpm build && node dist/cli.js knowledge extract",
@@ -36,20 +38,32 @@
     "knowledge:publish": "pnpm build && node dist/cli.js knowledge publish",
     "accept:knowledge": "pnpm build && node dist/cli.js accept knowledge",
     "acceptance:mcp:local": "pnpm build && node --test test/mcp-runtime.test.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && vue-tsc --noEmit -p web/tsconfig.json",
+    "typecheck:web": "vue-tsc --noEmit -p web/tsconfig.json",
     "lint": "node scripts/verify-docs.mjs",
-    "test": "node scripts/verify-docs.mjs && tsc --noEmit && pnpm build && node --test test/*.test.mjs"
+    "test": "node scripts/verify-docs.mjs && pnpm typecheck && pnpm build && node --test test/*.test.mjs",
+    "test:web": "vitest run",
+    "test:e2e": "pnpm build && playwright test"
   },
   "engines": {
-    "node": ">=20.0.0",
+    "node": ">=20.19.0",
     "pnpm": ">=10.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/node": "^22.15.30",
-    "typescript": "^5.8.3"
+    "@vitejs/plugin-vue": "^6.0.7",
+    "@vue/test-utils": "^2.4.11",
+    "jsdom": "^28.1.0",
+    "typescript": "^5.8.3",
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10",
+    "vue-tsc": "^3.3.7"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
+    "vue": "^3.5.39",
+    "vue-router": "^4.6.4",
     "zod": "^4.4.3"
   }
 }

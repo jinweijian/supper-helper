@@ -14,6 +14,7 @@ import { handleLogRoutes } from './routes/log-routes.js';
 import { handleOnboardingRoutes } from './routes/onboarding-routes.js';
 import { handleSessionRoutes } from './routes/session-routes.js';
 import { handleSettingsRoutes } from './routes/settings-routes.js';
+import { AssetNotFoundError, InvalidAssetPathError, sendPublicAsset } from './static-assets.js';
 
 export interface StartServerOptions {
   config: SuperHelperConfig;
@@ -82,6 +83,21 @@ async function route(
 ): Promise<void> {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   const { config, store, agent } = context;
+
+  if (req.method === 'GET' && url.pathname.startsWith('/assets/')) {
+    try {
+      sendPublicAsset(res, url.pathname);
+    } catch (error) {
+      if (error instanceof InvalidAssetPathError) {
+        sendJson(res, 400, { error: 'invalid asset path' });
+      } else if (error instanceof AssetNotFoundError) {
+        sendJson(res, 404, { error: 'asset not found' });
+      } else {
+        throw error;
+      }
+    }
+    return;
+  }
 
   if (req.method === 'GET' && url.pathname === '/setup') {
     sendHtml(res, renderSetupApp());
