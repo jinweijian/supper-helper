@@ -4,11 +4,13 @@ import { resolveSessionStorageRoot } from '../sessions/storage-scope.js';
 import { FileMemoryStore } from '../sessions/file-memory-store.js';
 import type { DiagnosticWorkerFactory } from '../workers/default-worker-factory.js';
 import type { SecretRef } from '../domain.js';
+import { createKnowledgeManagementService, type KnowledgeManagementService } from '../application/knowledge-management-service.js';
 
 export class GatewayApplicationContext {
   config: SuperHelperConfig;
   store: FileMemoryStore;
   agent: DiagnosticRuntime;
+  knowledge: KnowledgeManagementService;
 
   constructor(
     config: SuperHelperConfig,
@@ -20,6 +22,7 @@ export class GatewayApplicationContext {
     this.agent = new DiagnosticRuntime(config, this.store, this.createWorker(config), {
       mcp: { resolveSecret: this.resolveSecret },
     });
+    this.knowledge = createKnowledgeManagementService(config);
   }
 
   reload(config: SuperHelperConfig): void {
@@ -28,5 +31,6 @@ export class GatewayApplicationContext {
     this.agent = new DiagnosticRuntime(config, this.store, this.createWorker(config), {
       mcp: { resolveSecret: this.resolveSecret },
     });
+    this.knowledge = createKnowledgeManagementService(config);
   }
 }

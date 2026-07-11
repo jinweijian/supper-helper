@@ -82,7 +82,7 @@ async function route(
   secrets: FileSecretsRepository,
 ): Promise<void> {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-  const { config, store, agent } = context;
+  const { config, store, agent, knowledge } = context;
 
   if (req.method === 'GET' && url.pathname.startsWith('/assets/')) {
     try {
@@ -123,10 +123,10 @@ async function route(
   if (await handleSettingsRoutes(req, res, url, config, secrets)) {
     return;
   }
-  if (await handleSessionRoutes(req, res, url, config, store)) {
+  if (await handleSessionRoutes(req, res, url, config, store, knowledge)) {
     return;
   }
-  if (await handleKnowledgeRoutes(req, res, url, config)) {
+  if (await handleKnowledgeRoutes(req, res, url, config, knowledge)) {
     return;
   }
   if (await handleChatRoutes(req, res, url, config, agent)) {

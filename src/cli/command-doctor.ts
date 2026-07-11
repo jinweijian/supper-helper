@@ -3,11 +3,10 @@ import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { configPath, loadConfig, type ModelProviderConfig, type SuperHelperConfig } from '../config.js';
 import type { SecretRef } from '../domain.js';
-import { buildKnowledgeHealthSummary } from '../knowledge/index.js';
+import { createKnowledgeManagementService } from '../application/knowledge-management-service.js';
 import { FileOnboardingRunRepository, FileSecretsRepository } from '../onboarding/index.js';
 import type { EmbeddingProviderConfig } from '../providers/embedding/index.js';
 import type { RerankProviderConfig } from '../providers/rerank/index.js';
-import { createConfiguredKnowledgeRetriever } from '../retrieval/configured-search.js';
 import { readOption } from './args.js';
 import { resolveServerBinding } from './bindings.js';
 
@@ -84,11 +83,8 @@ export async function runDoctorCommand(input: RunDoctorCommandInput = {}): Promi
     });
   }
 
-  const knowledge = await buildKnowledgeHealthSummary({
-    config,
-    workspaceId: config.workspaces[0]?.id ?? 'current',
-    retrieveEvidence: createConfiguredKnowledgeRetriever(config),
-  });
+  const knowledge = await createKnowledgeManagementService(config)
+    .getLocalHealth(config.workspaces[0]?.id ?? 'current');
   checks.push({
     id: 'knowledge_index',
     label: 'knowledge index',

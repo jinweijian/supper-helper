@@ -34,6 +34,7 @@
 | `domain/contracts` | 稳定类型、端口、跨模块契约、纯领域概念 | 厂商 API 协议、HTTP DTO、文件路径策略、CLI 输出、runtime 编排 |
 | `config/secrets` | 配置加载、默认值、配置合并、SecretRef materialize、持久化脱敏 | provider 调用、worker 调用、runtime 决策、HTTP route 行为 |
 | `settings` | 设置页/设置 API 的配置合并、SecretRef 应用、public settings 映射、model/embedding/rerank smoke test 编排 | HTTP request/response、provider 厂商协议、runtime 诊断决策 |
+| `application` | 跨相邻模块的用例组合，例如本地 Knowledge health、显式 Retrieval probe、bind/reindex | HTTP DTO、检索算法、provider 厂商协议、artifact 持久化细节、runtime 回合决策 |
 | `gateway` | HTTP、路由、DTO、请求响应序列化、状态码 | Preflight、worker dispatch、检索策略、provider 协议、证据审核、最终回复 |
 | `cli` | `main.ts` 分发、`command-*` 参数解释、命令组合、用户可读输出、进程退出码 | provider adapter、RAG/recall 策略、runtime 诊断决策、knowledge 索引内部算法、HTTP route |
 | `runtime` | 用户回合编排、Agent 决策、Preflight、Evidence Review、降级/升级路径、生命周期事件 | HTTP DTO、厂商协议、原始文件持久化细节、knowledge 索引实现、CLI 输出 |
@@ -123,7 +124,7 @@ src/providers/
 
 ```text
 gateway/cli
-  -> runtime 或所属 command service
+  -> application / runtime 或所属 command service
   -> domain ports
   -> adapters / local repositories
   -> structured result

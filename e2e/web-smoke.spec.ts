@@ -12,6 +12,10 @@ test('Dashboard uses production assets and real Gateway workflows', async ({ pag
   await page.getByLabel('输入问题').fill('请检查当前项目状态');
   await page.getByRole('button', { name: '发送' }).click();
   await expect(page.getByText('helper', { exact: true })).toBeVisible();
+  expect(requests.filter((request) => request === 'GET /api/knowledge/health')).toHaveLength(0);
+  await page.getByRole('tab', { name: '知识健康' }).click();
+  await page.getByRole('button', { name: '测试检索' }).click();
+  await expect.poll(() => requests.filter((request) => request === 'GET /api/knowledge/health').length).toBe(1);
 
   const logButton = page.getByRole('button', { name: '日志', exact: true });
   await logButton.click();
@@ -36,7 +40,7 @@ test('Dashboard uses production assets and real Gateway workflows', async ({ pag
   await expect(settingsButton).toBeFocused();
 
   expect(requests).toEqual(expect.arrayContaining([
-    'POST /api/sessions', 'POST /api/chat', 'GET /api/session', 'GET /api/logs', 'GET /api/settings', 'POST /api/settings/model',
+    'POST /api/sessions', 'POST /api/chat', 'GET /api/session', 'GET /api/knowledge/health', 'GET /api/logs', 'GET /api/settings', 'POST /api/settings/model',
   ]));
 });
 

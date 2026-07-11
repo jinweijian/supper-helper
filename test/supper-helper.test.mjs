@@ -2450,7 +2450,7 @@ test('session API exposes knowledge health for the current workspace', async () 
     assert.equal(loaded.session.knowledgeHealth.embedding.status, 'off');
     assert.equal(loaded.session.knowledgeHealth.similarWorkspaces[0].documentCount, 381);
     assert.ok(loaded.session.knowledgeHealth.actions.includes('绑定知识库'));
-    assert.ok(loaded.session.knowledgeHealth.actions.includes('运行健康检查'));
+    assert.ok(loaded.session.knowledgeHealth.actions.includes('测试检索'));
   } finally {
     if (server) {
       await server.close();

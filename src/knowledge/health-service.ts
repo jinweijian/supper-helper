@@ -1,5 +1,4 @@
 import type { SuperHelperConfig } from '../config.js';
-import { createConfiguredKnowledgeRetriever } from '../retrieval/configured-search.js';
 import {
   buildKnowledgeHealthSummary,
   initKnowledgeWorkspace,
@@ -13,15 +12,12 @@ export type { KnowledgeHealthSummary };
 export interface KnowledgeHealthInput {
   config: SuperHelperConfig;
   workspaceId: string;
-  query?: string;
 }
 
-export async function getKnowledgeHealthSummary(input: KnowledgeHealthInput): Promise<KnowledgeHealthSummary> {
+export async function getLocalKnowledgeHealthSummary(input: KnowledgeHealthInput): Promise<KnowledgeHealthSummary> {
   return buildKnowledgeHealthSummary({
     config: input.config,
     workspaceId: input.workspaceId,
-    query: input.query,
-    retrieveEvidence: createConfiguredKnowledgeRetriever(input.config),
   });
 }
 

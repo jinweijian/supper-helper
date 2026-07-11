@@ -1,10 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { SuperHelperConfig } from '../../config.js';
-import {
-  bindKnowledgeWorkspace,
-  getKnowledgeHealthSummary,
-  reindexKnowledgeWorkspace,
-} from '../../knowledge/health-service.js';
+import type { KnowledgeManagementService } from '../../application/knowledge-management-service.js';
 import { readJson, sendJson } from '../http-utils.js';
 import { resolveConfiguredWorkspaceId } from '../request-contracts.js';
 
@@ -18,18 +14,19 @@ export async function handleKnowledgeRoutes(
   res: ServerResponse,
   url: URL,
   config: SuperHelperConfig,
+  knowledge: KnowledgeManagementService,
 ): Promise<boolean> {
   if (req.method === 'GET' && url.pathname === '/api/knowledge/health') {
     const workspaceId = resolveConfiguredWorkspaceId(config, url.searchParams.get('workspaceId'));
 
+    const query = url.searchParams.get('query')?.trim() ?? '';
+    const knowledgeHealth = query
+      ? (await knowledge.probeSearch(workspaceId, query)).knowledgeHealth
+      : await knowledge.getLocalHealth(workspaceId);
     sendJson(res, 200, {
       ok: true,
       workspaceId,
-      knowledgeHealth: await getKnowledgeHealthSummary({
-        config,
-        workspaceId,
-        query: url.searchParams.get('query') ?? undefined,
-      }),
+      knowledgeHealth,
     });
     return true;
   }
@@ -38,16 +35,12 @@ export async function handleKnowledgeRoutes(
     const body = (await readJson(req)) as KnowledgeActionBody;
     const workspaceId = resolveConfiguredWorkspaceId(config, body.workspaceId);
 
-    const init = bindKnowledgeWorkspace({ config, workspaceId });
+    const result = await knowledge.bind(workspaceId);
     sendJson(res, 200, {
       ok: true,
       workspaceId,
-      init,
-      knowledgeHealth: await getKnowledgeHealthSummary({
-        config,
-        workspaceId,
-        query: body.query,
-      }),
+      init: result.init,
+      knowledgeHealth: result.knowledgeHealth,
     });
     return true;
   }
@@ -56,16 +49,12 @@ export async function handleKnowledgeRoutes(
     const body = (await readJson(req)) as KnowledgeActionBody;
     const workspaceId = resolveConfiguredWorkspaceId(config, body.workspaceId);
 
-    const update = reindexKnowledgeWorkspace({ config, workspaceId });
+    const result = await knowledge.reindex(workspaceId);
     sendJson(res, 200, {
       ok: true,
       workspaceId,
-      update,
-      knowledgeHealth: await getKnowledgeHealthSummary({
-        config,
-        workspaceId,
-        query: body.query,
-      }),
+      update: result.update,
+      knowledgeHealth: result.knowledgeHealth,
     });
     return true;
   }

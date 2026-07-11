@@ -5,7 +5,7 @@ import { chunksPath, dirtyFlagPath, knowledgeRoot, manifestPath } from './paths.
 import { resolveKnowledgeWorkspaceRoot, workspaceKnowledgeKey } from './storage-scope.js';
 import { discoverKnowledgeDocuments } from './documents/discovery.js';
 import { checkKnowledgeVectorCompatibility } from './vector-index.js';
-import type { KnowledgeEvidencePack, KnowledgeIndexManifest, KnowledgeSearchQuery } from './types.js';
+import type { KnowledgeIndexManifest } from './types.js';
 
 export type KnowledgeHealthStatus = 'ok' | 'warn' | 'error' | 'off';
 
@@ -55,13 +55,9 @@ export interface KnowledgeSimilarWorkspace {
   updatedAt?: string;
 }
 
-export type KnowledgeHealthRetriever = (query: KnowledgeSearchQuery) => Promise<KnowledgeEvidencePack>;
-
 export async function buildKnowledgeHealthSummary(input: {
   config: SuperHelperConfig;
   workspaceId: string;
-  query?: string;
-  retrieveEvidence?: KnowledgeHealthRetriever;
 }): Promise<KnowledgeHealthSummary> {
   const workspace = input.config.workspaces.find((item) => item.id === input.workspaceId) ?? input.config.workspaces[0];
   const workspaceRoot = workspace?.rootPath ? resolve(workspace.rootPath) : '';
@@ -74,13 +70,10 @@ export async function buildKnowledgeHealthSummary(input: {
   const dirty = existsSync(dirtyFlagPath(knowledgeWorkspaceRoot));
   const docs = knowledgeRootExists ? discoverKnowledgeDocuments(knowledgeWorkspaceRoot) : [];
   const embedding = embeddingHealth(input.config, knowledgeWorkspaceRoot);
-  const query = input.query?.trim() || '';
-  const search = await searchHealth({
+  const search = localSearchHealth({
     workspaceRoot: knowledgeWorkspaceRoot,
-    query,
     rootExists: knowledgeRootExists,
     docsCount: docs.length,
-    retrieveEvidence: input.retrieveEvidence,
   });
 
   return {
@@ -109,7 +102,7 @@ export async function buildKnowledgeHealthSummary(input: {
     search,
     embedding,
     similarWorkspaces: findSimilarKnowledgeWorkspaces(input.config, knowledgeWorkspaceRoot),
-    actions: ['绑定知识库', '重建索引', '运行健康检查'],
+    actions: ['绑定知识库', '重建索引', '测试检索'],
   };
 }
 
@@ -137,17 +130,15 @@ function embeddingHealth(config: SuperHelperConfig, workspaceRoot: string): Know
   };
 }
 
-async function searchHealth(input: {
+function localSearchHealth(input: {
   workspaceRoot: string;
-  query: string;
   rootExists: boolean;
   docsCount: number;
-  retrieveEvidence?: KnowledgeHealthRetriever;
-}): Promise<KnowledgeHealthSummary['search']> {
+}): KnowledgeHealthSummary['search'] {
   if (!input.rootExists) {
     return {
       status: 'error',
-      query: input.query,
+      query: '',
       searchedFiles: 0,
       matchedFiles: 0,
       filteredOut: [],
@@ -157,48 +148,20 @@ async function searchHealth(input: {
   if (input.docsCount === 0) {
     return {
       status: 'warn',
-      query: input.query,
+      query: '',
       searchedFiles: 0,
       matchedFiles: 0,
       filteredOut: [],
       reason: 'knowledge workspace has no active documents',
     };
   }
-  if (!input.query) {
-    return {
-      status: 'ok',
-      query: '',
-      searchedFiles: input.docsCount,
-      matchedFiles: 0,
-      filteredOut: [],
-      reason: 'waiting for a case query',
-    };
-  }
-  if (!input.retrieveEvidence) {
-    return {
-      status: 'warn',
-      query: input.query,
-      searchedFiles: input.docsCount,
-      matchedFiles: 0,
-      filteredOut: [],
-      reason: 'configured retrieval health check is not available at this boundary',
-    };
-  }
-
-  const evidencePack = await input.retrieveEvidence({
-    workspaceRoot: input.workspaceRoot,
-    query: input.query,
-    limit: 5,
-  });
   return {
-    status: evidencePack.results.length ? 'ok' : 'warn',
-    query: input.query,
-    searchedFiles: evidencePack.coverage.searched_files,
-    matchedFiles: evidencePack.coverage.matched_files,
-    filteredOut: evidencePack.coverage.filtered_out,
-    reason: evidencePack.results.length
-      ? 'configured retrieval returned evidence for the current query'
-      : 'configured retrieval returned no evidence for the current query',
+    status: 'ok',
+    query: '',
+    searchedFiles: input.docsCount,
+    matchedFiles: 0,
+    filteredOut: [],
+    reason: 'waiting for an explicit retrieval probe',
   };
 }
 

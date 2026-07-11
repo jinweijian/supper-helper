@@ -3,7 +3,7 @@ import type { SuperHelperConfig } from '../../config.js';
 import type { UserPersona } from '../../domain.js';
 import type { CaseRepository, StoredCase } from '../../sessions/case-repository.js';
 import { recoverStaleActiveTurn } from '../../sessions/stale-turn.js';
-import { getKnowledgeHealthSummary } from '../../knowledge/health-service.js';
+import type { KnowledgeManagementService } from '../../application/knowledge-management-service.js';
 import { serializeSession, sessionSummary, type SerializedSession } from '../dto.js';
 import { readJson, sendJson } from '../http-utils.js';
 import { requireCaseId, resolveConfiguredWorkspaceId } from '../request-contracts.js';
@@ -14,6 +14,7 @@ export async function handleSessionRoutes(
   url: URL,
   config: SuperHelperConfig,
   store: CaseRepository,
+  knowledge: KnowledgeManagementService,
 ): Promise<boolean> {
   if (req.method === 'GET' && url.pathname === '/api/sessions') {
     const sessions = store.listCases();
@@ -35,7 +36,7 @@ export async function handleSessionRoutes(
     });
     caseSession.userPersona = body.persona ?? config.agent.defaultUserPersona;
     store.saveCase(caseSession);
-    sendJson(res, 200, { session: await serializeSessionForRoute(caseSession, config, url) });
+    sendJson(res, 200, { session: await serializeSessionForRoute(caseSession, config, url, knowledge) });
     return true;
   }
 
@@ -49,7 +50,7 @@ export async function handleSessionRoutes(
     }
 
     recoverStaleActiveTurn(caseSession, store, config);
-    sendJson(res, 200, { session: await serializeSessionForRoute(caseSession, config, url) });
+    sendJson(res, 200, { session: await serializeSessionForRoute(caseSession, config, url, knowledge) });
     return true;
   }
 
@@ -73,7 +74,7 @@ export async function handleSessionRoutes(
       sendJson(res, 400, { error: 'unsupported session action' });
       return true;
     }
-    sendJson(res, 200, { session: await serializeSessionForRoute(caseSession, config, url) });
+    sendJson(res, 200, { session: await serializeSessionForRoute(caseSession, config, url, knowledge) });
     return true;
   }
 
@@ -95,23 +96,12 @@ async function serializeSessionForRoute(
   caseSession: StoredCase,
   config: SuperHelperConfig,
   url: URL,
+  knowledge: KnowledgeManagementService,
 ): Promise<SerializedSession> {
   const session = serializeSession(caseSession, config);
   if (url.searchParams.get('includeKnowledgeHealth') === 'false') {
     return session;
   }
-  session.knowledgeHealth = await getKnowledgeHealthSummary({
-    config,
-    workspaceId: caseSession.workspaceId,
-    query: knowledgeHealthQuery(caseSession),
-  });
+  session.knowledgeHealth = await knowledge.getLocalHealth(caseSession.workspaceId);
   return session;
-}
-
-function knowledgeHealthQuery(caseSession: StoredCase): string {
-  return [...caseSession.messages]
-    .reverse()
-    .find((message) => message.role === 'user')
-    ?.body
-    .trim() || caseSession.title;
 }
