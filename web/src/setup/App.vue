@@ -11,6 +11,7 @@ const form = reactive({
   embeddingBaseUrl: 'https://api.siliconflow.cn/v1', embeddingModel: 'Qwen/Qwen3-Embedding-0.6B', embeddingKey: '', dimensions: 1024, batchSize: 16,
   rerankBaseUrl: 'https://api.siliconflow.cn/v1', rerankModel: 'BAAI/bge-reranker-v2-m3', rerankKey: '', topN: 8,
 });
+const savedApiKeys = reactive({ agent: false, embedding: false, rerank: false });
 const advanced = ref(false);
 const pickerOpen = ref(false);
 const pickerField = ref<'workspacePath' | 'knowledgeRoot' | 'sourceDir'>('workspacePath');
@@ -35,12 +36,15 @@ function hydrate(draft?: Record<string, any>): void {
   form.port = draft.server?.port ?? form.port;
   form.agentBaseUrl = draft.agent?.provider?.baseUrl ?? form.agentBaseUrl;
   form.agentModel = draft.agent?.provider?.model ?? form.agentModel;
+  savedApiKeys.agent = draft.agent?.provider?.hasApiKey === true;
   form.embeddingBaseUrl = draft.embedding?.baseUrl ?? form.embeddingBaseUrl;
   form.embeddingModel = draft.embedding?.model ?? form.embeddingModel;
+  savedApiKeys.embedding = draft.embedding?.hasApiKey === true;
   form.dimensions = draft.embedding?.dimensions ?? form.dimensions;
   form.batchSize = draft.embedding?.batchSize ?? form.batchSize;
   form.rerankBaseUrl = draft.rerank?.baseUrl ?? form.rerankBaseUrl;
   form.rerankModel = draft.rerank?.model ?? form.rerankModel;
+  savedApiKeys.rerank = draft.rerank?.hasApiKey === true;
   form.topN = draft.rerank?.topN ?? form.topN;
 }
 
@@ -68,6 +72,9 @@ async function run(): Promise<void> {
 }
 function openPicker(field: typeof pickerField.value, event: MouseEvent): void { pickerField.value = field; pickerOpener.value = event.currentTarget as HTMLElement; pickerOpen.value = true; }
 function selectPath(path: string): void { form[pickerField.value] = path; pickerOpen.value = false; }
+function apiKeyHint(hasApiKey: boolean): string {
+  return hasApiKey ? '已保存 API Key，留空将继续使用原记录。' : '当前未保存 API Key，留空则不设置。';
+}
 </script>
 
 <template>
@@ -85,9 +92,9 @@ function selectPath(path: string): void { form[pickerField.value] = path; picker
       <label>绑定模式<select v-model="form.bindMode"><option value="loopback">仅本机</option><option value="lan">可信内网</option></select></label>
       <p v-if="form.bindMode === 'lan'" class="warning-banner">当前页面和 API 暴露在可信内网，暂未实现鉴权。请只在可信内网使用。</p>
       <div class="provider-grid">
-        <fieldset><legend>Agent</legend><label>Base URL<input v-model="form.agentBaseUrl" /></label><label>模型<input v-model="form.agentModel" /></label><label>API Key<input v-model="form.agentKey" type="password" autocomplete="off" /></label></fieldset>
-        <fieldset><legend>Embedding</legend><label>Base URL<input v-model="form.embeddingBaseUrl" /></label><label>模型<input v-model="form.embeddingModel" /></label><label>API Key<input v-model="form.embeddingKey" type="password" autocomplete="off" /></label></fieldset>
-        <fieldset><legend>Rerank</legend><label>Base URL<input v-model="form.rerankBaseUrl" /></label><label>模型<input v-model="form.rerankModel" /></label><label>API Key<input v-model="form.rerankKey" type="password" autocomplete="off" /></label></fieldset>
+        <fieldset><legend>Agent</legend><label>Base URL<input v-model="form.agentBaseUrl" /></label><label>模型<input v-model="form.agentModel" /></label><label>API Key<input v-model="form.agentKey" type="password" autocomplete="off" /><small class="api-key-hint">{{ apiKeyHint(savedApiKeys.agent) }}</small></label></fieldset>
+        <fieldset><legend>Embedding</legend><label>Base URL<input v-model="form.embeddingBaseUrl" /></label><label>模型<input v-model="form.embeddingModel" /></label><label>API Key<input v-model="form.embeddingKey" type="password" autocomplete="off" /><small class="api-key-hint">{{ apiKeyHint(savedApiKeys.embedding) }}</small></label></fieldset>
+        <fieldset><legend>Rerank</legend><label>Base URL<input v-model="form.rerankBaseUrl" /></label><label>模型<input v-model="form.rerankModel" /></label><label>API Key<input v-model="form.rerankKey" type="password" autocomplete="off" /><small class="api-key-hint">{{ apiKeyHint(savedApiKeys.rerank) }}</small></label></fieldset>
       </div>
       <button type="button" @click="advanced = !advanced">{{ advanced ? '收起高级设置' : '高级设置' }}</button>
       <div v-if="advanced" class="field-grid"><label>端口<input v-model="form.port" type="number" /></label><label>Embedding dimensions<input v-model="form.dimensions" type="number" /></label><label>Embedding batchSize<input v-model="form.batchSize" type="number" /></label><label>Rerank topN<input v-model="form.topN" type="number" /></label></div>
