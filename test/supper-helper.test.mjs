@@ -3762,6 +3762,8 @@ test('agent registry exposes main and configured sub-agent contracts', () => {
     'knowledge_router',
     'evidence_judge',
     'rag_answerability',
+    'mcp_planner',
+    'mcp_evidence_extractor',
     'case_curator',
     'output_review',
     'presentation',
@@ -3773,6 +3775,8 @@ test('agent registry exposes main and configured sub-agent contracts', () => {
   assert.match(resolveAgentConfig('knowledge_router').content, /Knowledge Router Agent/);
   assert.match(resolveAgentConfig('evidence_judge').content, /Evidence Judge Agent/);
   assert.match(resolveAgentConfig('rag_answerability').content, /RAG Answerability Agent/);
+  assert.match(resolveAgentConfig('mcp_planner').content, /MCP Planner Agent/);
+  assert.match(resolveAgentConfig('mcp_evidence_extractor').content, /MCP Evidence Extractor Agent/);
   assert.match(resolveAgentConfig('case_curator').content, /Case Curator Agent/);
   assert.equal(listPublicAgentConfigs().some((agent) => agent.stage === 'presentation' && agent.mayProduceUserFacingText), true);
   assert.equal(listPublicAgentConfigs().find((agent) => agent.stage === 'presentation').executionMode, 'presentation_only');

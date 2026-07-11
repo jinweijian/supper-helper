@@ -1,6 +1,6 @@
 import type { SuperHelperConfig } from '../config.js';
 import { getModelProvider } from '../config.js';
-import type { UserPersona } from '../domain.js';
+import type { DiagnosticRun, UserPersona } from '../domain.js';
 import { createModelClient } from '../providers/model/adapter.js';
 import type { CaseRepository, StoredCase } from '../sessions/case-repository.js';
 import type { DiagnosticWorker } from '../workers/diagnostic-worker.js';
@@ -18,8 +18,11 @@ import { SessionLifecycle } from './session-lifecycle.js';
 import { CaseTurnQueue } from './turn-queue.js';
 import { bindTurnContextCutoff, clearTurnContextCutoff } from '../sessions/turn-context-snapshot.js';
 import { WorkerDiagnosisService } from './worker-diagnosis.js';
+import { McpEvidenceService, type McpEvidenceServiceOptions } from '../mcp/evidence-service.js';
+import { caseStatusFromDiagnosticResult } from './review-gate.js';
 
 export interface AgentResponse extends RuntimeTurnResponse {}
+export interface DiagnosticRuntimeOptions { mcp?: McpEvidenceServiceOptions }
 
 export class DiagnosticRuntime {
   private readonly events: CaseRuntimeEventRecorder;
@@ -31,11 +34,13 @@ export class DiagnosticRuntime {
   private readonly workerDiagnosis: WorkerDiagnosisService;
   private readonly reviewer: ReviewPresentationService;
   private readonly caseCuration: CaseCurationService;
+  private readonly mcpEvidence: McpEvidenceService;
 
   constructor(
     config: SuperHelperConfig,
     private readonly store: CaseRepository,
     worker: DiagnosticWorker,
+    options: DiagnosticRuntimeOptions = {},
   ) {
     const model = createModelClient(getModelProvider(config));
     const mainAgentSpec = resolveAgentConfig('main').content;
@@ -73,6 +78,7 @@ export class DiagnosticRuntime {
     this.knowledgeTurn = new KnowledgeTurnService(config, store, this.events, this.reviewer, ragAnswerabilityService);
     this.workerDiagnosis = new WorkerDiagnosisService(store, worker, this.events, this.reviewer);
     this.caseCuration = new CaseCurationService(config, store, this.events);
+    this.mcpEvidence = new McpEvidenceService(config, options.mcp);
   }
 
   async handleUserMessage(input: {
@@ -154,6 +160,42 @@ export class DiagnosticRuntime {
     );
     if (knowledgeResponse) {
       return knowledgeResponse;
+    }
+
+    const mcpResult = await this.mcpEvidence.run(decision.request);
+    if (decision.request.context?.mcp) {
+      this.store.addLogEvent(caseSession, {
+        actor: 'mcp',
+        phase: 'mcp_evidence_completed',
+        summary: `MCP evidence stage completed with ${decision.request.context.mcp.calls.length} bounded call(s).`,
+        severity: decision.request.context.mcp.evidence.length > 0 ? 'ok' : 'warn',
+        detail: {
+          calls: decision.request.context.mcp.calls.map((call) => ({
+            serverId: call.serverId,
+            toolName: call.toolName,
+            status: call.status,
+            reason: call.reason,
+            evidenceId: call.evidenceId,
+          })),
+        },
+      });
+    }
+    if (mcpResult) {
+      const run: DiagnosticRun = {
+        id: decision.request.runId,
+        caseId: caseSession.id,
+        status: mcpResult.status,
+        request: decision.request,
+        result: mcpResult,
+      };
+      this.store.addRun(caseSession, run);
+      caseSession.status = caseStatusFromDiagnosticResult(mcpResult);
+      this.store.saveCase(caseSession);
+      const review = await this.reviewer.reviewAndFormat(caseSession, mcpResult, run);
+      this.events.presentationPrepared(caseSession, review.decision);
+      this.store.addMessage(caseSession, { role: 'helper', body: review.reply, replyToMessageId });
+      this.events.finalReplyCreated(caseSession, review.reply, review.decision);
+      return { caseSession, assistantMessage: review.reply, decision: review.decision };
     }
 
     const review = await this.workerDiagnosis.diagnose(caseSession, decision.request);

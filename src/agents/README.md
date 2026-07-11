@@ -12,6 +12,8 @@
 - `knowledge-router.md`: 知识路由 Agent，负责模块、意图、关键词和升级信号识别。
 - `evidence-judge.md`: 证据充分性 Agent，负责判断知识库证据是否足够或是否需要查代码。
 - `rag-answerability.md`: RAG 可回答性与有效信息萃取 Agent，负责判断知识库结果是否满足 AnswerGoal，并在 partial 时输出可保留 claim 和升级焦点。
+- `mcp-planner.md`: MCP 只读调用规划 Agent，受 Runtime 两次调用预算约束。
+- `mcp-evidence-extractor.md`: MCP evidence envelope 校验与 claim 绑定 Agent，不产生用户可见文本。
 - `case-curator.md`: Case 沉淀 Agent，负责生成待复核 solved case 草稿。
 - `output-review.md`: 证据与输出审核 Agent。
 - `presentation.md`: 美化输出 / persona-aware presentation Agent。

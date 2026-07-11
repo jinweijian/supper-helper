@@ -35,6 +35,7 @@
     "knowledge:review": "pnpm build && node dist/cli.js knowledge review",
     "knowledge:publish": "pnpm build && node dist/cli.js knowledge publish",
     "accept:knowledge": "pnpm build && node dist/cli.js accept knowledge",
+    "acceptance:mcp:local": "pnpm build && node --test test/mcp-runtime.test.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "node scripts/verify-docs.mjs",
     "test": "node scripts/verify-docs.mjs && tsc --noEmit && pnpm build && node --test test/*.test.mjs"
@@ -46,5 +47,9 @@
   "devDependencies": {
     "@types/node": "^22.15.30",
     "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "^4.4.3"
   }
 }

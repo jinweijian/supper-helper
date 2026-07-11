@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import type { SecretRef, UserPersona } from './domain.js';
 import type { EmbeddingProviderConfig } from './providers/embedding/contract.js';
 import type { RerankProviderConfig } from './providers/rerank/contract.js';
+import type { McpServerConfig } from './mcp/contracts.js';
 import { writeJsonAtomic } from './onboarding/atomic-json.js';
 
 export interface ModelProviderConfig {
@@ -81,14 +82,7 @@ export interface SuperHelperConfig {
     rootPath: string;
     mcpToolIds: string[];
   }>;
-  mcpTools: Array<{
-    id: string;
-    name: string;
-    protocol: 'stdio' | 'http' | 'sse';
-    permission: 'read_only' | 'read_write';
-    enabled: boolean;
-    config?: unknown;
-  }>;
+  mcpTools: McpServerConfig[];
   onboarding: {
     version: 1;
     completedAt?: string;

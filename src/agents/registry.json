@@ -72,6 +72,26 @@
       "summary": "RAG 可回答性 Agent，负责判断知识库结果是否满足 AnswerGoal，并在 partial 时萃取可保留结论和升级焦点。"
     },
     {
+      "id": "mcp-planner",
+      "role": "bounded-read-only-mcp-planner",
+      "stage": "mcp_planner",
+      "configPath": "mcp-planner.md",
+      "required": false,
+      "mayProduceUserFacingText": false,
+      "executionMode": "deterministic",
+      "summary": "MCP Planner 只在 Runtime 预算内选择已配置的只读工具调用，不产生用户可见文本。"
+    },
+    {
+      "id": "mcp-evidence-extractor",
+      "role": "mcp-evidence-envelope-validator",
+      "stage": "mcp_evidence_extractor",
+      "configPath": "mcp-evidence-extractor.md",
+      "required": false,
+      "mayProduceUserFacingText": false,
+      "executionMode": "deterministic",
+      "summary": "MCP Evidence Extractor 将归一化结果绑定为 evidence/claim，不能直接回复用户。"
+    },
+    {
       "id": "case-curator",
       "role": "solved-case-curator",
       "stage": "case_curator",

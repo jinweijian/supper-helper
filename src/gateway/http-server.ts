@@ -32,7 +32,11 @@ export interface StartedServer {
 export function startServer(options: StartServerOptions): Promise<StartedServer> {
   const secrets = new FileSecretsRepository(options.config.storage.rootDir);
   const runtimeConfig = materializeConfigSecrets(options.config, secrets);
-  const context = new GatewayApplicationContext(runtimeConfig, options.workerFactory ?? createDefaultDiagnosticWorker);
+  const context = new GatewayApplicationContext(
+    runtimeConfig,
+    options.workerFactory ?? createDefaultDiagnosticWorker,
+    (ref) => secrets.resolve(ref),
+  );
   const onboarding = options.onboarding ?? createOnboardingService({
     config: runtimeConfig,
     onConfigCommitted: (config) => context.reload(materializeConfigSecrets(config, secrets)),

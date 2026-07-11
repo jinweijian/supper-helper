@@ -1,4 +1,5 @@
 import { configPath, ensureConfig, saveConfig } from '../config.js';
+import type { McpServerConfig } from '../mcp/contracts.js';
 import { readOption } from './args.js';
 
 export function runInitCommand(): void {
@@ -74,7 +75,7 @@ export function runConfigCommand(input: {
       permission: (readOption(input.argv, '--permission') as 'read_only' | 'read_write' | undefined) ?? 'read_only',
       enabled: true,
       config: readJsonOption(input.argv, '--config-json'),
-    };
+    } as McpServerConfig;
     config.mcpTools = config.mcpTools.filter((item) => item.id !== id).concat(tool);
     config.workspaces[0] = {
       ...config.workspaces[0],

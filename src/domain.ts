@@ -226,6 +226,28 @@ export interface DiagnosticRequestContext {
     stopReason?: 'max_attempts' | 'sufficient_evidence' | 'needs_user' | 'human_escalation';
     previousArtifactTargets?: string[];
   };
+  mcp?: {
+    calls: Array<{
+      serverId: string;
+      toolName: string;
+      status: 'completed' | 'rejected' | 'failed';
+      reason?: string;
+      result?: {
+        text: string;
+        structuredContent?: string;
+        locators: Array<{
+          kind: 'image' | 'audio' | 'blob';
+          locator: string;
+          mimeType?: string;
+          sizeBytes: number;
+        }>;
+        truncated: boolean;
+      };
+      evidenceId?: string;
+    }>;
+    evidence: Evidence[];
+    missingInfo: string[];
+  };
 }
 
 export interface ResolvedTurnStatement {
