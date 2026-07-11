@@ -8,7 +8,9 @@ import { CaseRuntimeEventRecorder } from './event-recorder.js';
 import {
   formatReviewFailureFallback,
   personaName,
+  renderPresentationPlan,
   ruleBasedReviewAndFormat,
+  type PresentationPlan,
 } from './presenter.js';
 import {
   caseStatusFromDiagnosticResult,
@@ -94,21 +96,21 @@ ${this.outputReviewAgentSpec}
 
 ${this.presentationAgentSpec}
 
-你只负责基于已经通过确定性审核的 claim/evidence 生成回复，并返回 claim/evidence ID 供 runtime 校验；不得新增 ID 或事实。
+你只负责选择已通过确定性审核的 claim/evidence ID 并规划展示顺序，runtime 会确定性渲染用户可见回复。你不得返回自由回复文本（reply 字段）或新增事实。
 当前用户视角：${personaName(caseSession.userPersona)}。
 
 只返回 JSON：
-{"answerTarget":"用户真实问题","directAnswer":"第一句要正面回答的内容","reply":"最终用户可见中文回复","claimIds":["claim_1"],"evidenceIds":["ev_1"],"directAnswerClaimIds":["claim_1"]}
+{"answerTarget":"用户真实问题","claimIds":["claim_1"],"evidenceIds":["ev_1"],"directAnswerClaimIds":["claim_1"],"sections":[{"title":"结论","claimIds":["claim_1"]}]}
 
 约束：
 - answerTarget 必须来自 answerGoal.resolvedQuestion，不得使用 diagnosticObjective 替代用户问题。
 - directAnswerClaimIds 必须等于 frozenPrimaryAnswerClaimIds；如果为空，说明本轮没有最终主答，只能表达初步判断。
-- reply 只能使用 acceptedClaims/acceptedEvidence 中已经审核通过的事实、推断和未知，不得新增事实。
-- claimIds 必须非空，且只能选择 acceptedClaims 中存在的 ID。
+- claimIds 必须非空，且只能选择 acceptedClaims 中存在的 ID。不得选择 role 为 process_note 的 claim。
 - evidenceIds 必须覆盖所选 claimIds 引用的全部 evidence。
-- 先表达 frozen primary answer，再调整 persona 语气；不得通过中文问法列表、问题类型枚举或过程目标选择主答。
+- sections 可选，用于规划展示顺序；每个 section 的 claimIds 必须是 claimIds 的子集。runtime 只渲染被选 claim 原文、accepted next action、missingInfo 与固定连接语。
+- 不得通过中文问法列表、问题类型枚举或过程目标选择主答。
 - 不要把“系统 bug / 设计使然 / 配置或使用问题 / 目前不能确认”这类归类放在结论第一句，除非它本身就是 frozen primary answer。
-- 非开发视角不得暴露 src/、knowledge/_sources、caseId/runId、worker command、raw stdout/stderr、内部 prompt。
+- 非开发视角不得暴露 src/、knowledge/_sources、caseId/runId、worker command、raw stdout/stderr、内部 prompt、Evidence Judge 分数或路由分数。
 - 确定性 Review Gate 已冻结结论状态，Presentation 无权修改 outcome/status/recommendedNextAction。`,
       },
       {
@@ -131,26 +133,25 @@ ${this.presentationAgentSpec}
       result,
       acceptedClaimIds,
       acceptedPrimaryAnswerClaimIds,
-      persona: caseSession.userPersona,
     });
     this.events.modelReviewResult(caseSession, {
       accepted: Boolean(validated),
       answerTarget: typeof parsed.answerTarget === 'string' ? parsed.answerTarget.slice(0, 300) : undefined,
-      claimIds: validated?.claimIds ?? safeStringArray(parsed.claimIds),
-      evidenceIds: validated?.evidenceIds ?? safeStringArray(parsed.evidenceIds),
-      directAnswerClaimIds: validated?.directAnswerClaimIds ?? safeStringArray(parsed.directAnswerClaimIds),
+      claimIds: validated?.plan.claimIds ?? safeStringArray(parsed.claimIds),
+      evidenceIds: validated?.plan.evidenceIds ?? safeStringArray(parsed.evidenceIds),
+      directAnswerClaimIds: validated?.plan.directAnswerClaimIds ?? safeStringArray(parsed.directAnswerClaimIds),
     });
-    return validated?.reply;
+    if (!validated) return undefined;
+    return renderPresentationPlan({ plan: validated.plan, result, persona: caseSession.userPersona });
   }
 }
 
 interface ModelPresentationParsed {
   answerTarget?: unknown;
-  directAnswer?: unknown;
-  reply?: unknown;
   claimIds?: unknown;
   evidenceIds?: unknown;
   directAnswerClaimIds?: unknown;
+  sections?: unknown;
 }
 
 function validateModelPresentation(input: {
@@ -158,19 +159,9 @@ function validateModelPresentation(input: {
   result: DiagnosticResult;
   acceptedClaimIds: string[];
   acceptedPrimaryAnswerClaimIds: string[];
-  persona: StoredCase['userPersona'];
-}): { reply: string; claimIds: string[]; evidenceIds: string[]; directAnswerClaimIds: string[] } | undefined {
-  const { parsed, result, acceptedClaimIds, acceptedPrimaryAnswerClaimIds, persona } = input;
-  if (typeof parsed.reply !== 'string' || !parsed.reply.trim()) {
-    return undefined;
-  }
-  if (typeof parsed.directAnswer !== 'string' || !parsed.directAnswer.trim()) {
-    return undefined;
-  }
+}): { plan: PresentationPlan; } | undefined {
+  const { parsed, result, acceptedClaimIds, acceptedPrimaryAnswerClaimIds } = input;
   if (!Array.isArray(parsed.claimIds) || !Array.isArray(parsed.evidenceIds)) {
-    return undefined;
-  }
-  if (acceptedPrimaryAnswerClaimIds.length > 0 && !Array.isArray(parsed.directAnswerClaimIds)) {
     return undefined;
   }
   if (!parsed.claimIds.every((id): id is string => typeof id === 'string')) {
@@ -197,7 +188,7 @@ function validateModelPresentation(input: {
     return undefined;
   }
 
-  const claimsById = new Map(result.claims.map((claim) => [claim.id, claim]));
+  const claimsById = new Map(result.claims.map((claim) => [claim.id!, claim]));
   const selectedClaims = claimIds.map((id) => claimsById.get(id)).filter(Boolean);
   if (selectedClaims.length !== claimIds.length) {
     return undefined;
@@ -208,14 +199,10 @@ function validateModelPresentation(input: {
     return undefined;
   }
 
-  const reply = parsed.reply.trim();
-  const directAnswer = parsed.directAnswer.trim();
-  if (persona !== 'developer' && containsInternalDetails(reply)) {
+  if (claimIds.some((id) => claimsById.get(id)?.role === 'process_note')) {
     return undefined;
   }
-  if (!replyStartsWithDirectAnswer(reply, directAnswer)) {
-    return undefined;
-  }
+
   const selectedClaimIds = new Set(claimIds);
   const selectedPrimaryIds = claimIds.filter((id) => acceptedPrimaryAnswerClaimIds.includes(id));
   if (acceptedPrimaryAnswerClaimIds.length > 0 && selectedPrimaryIds.length !== acceptedPrimaryAnswerClaimIds.length) {
@@ -227,18 +214,8 @@ function validateModelPresentation(input: {
   if (directAnswerClaimIds.some((id) => !selectedClaimIds.has(id))) {
     return undefined;
   }
-  const unselectedClaimTexts = result.claims
-    .filter((claim) => claim.id && !selectedClaimIds.has(claim.id))
-    .map((claim) => claim.text.trim())
-    .filter((text) => text.length >= 8);
-  if (unselectedClaimTexts.some((text) => reply.includes(text))) {
-    return undefined;
-  }
-  if (selectedClaims.length > 0 && replyLacksSelectedClaimSignal(reply, selectedClaims.map((claim) => claim!))) {
-    return undefined;
-  }
 
-  return { reply, claimIds, evidenceIds, directAnswerClaimIds };
+  return { plan: { claimIds, evidenceIds, directAnswerClaimIds } };
 }
 
 function safeStringArray(value: unknown): string[] {
@@ -248,43 +225,10 @@ function safeStringArray(value: unknown): string[] {
   return Array.from(new Set(value.filter((item): item is string => typeof item === 'string'))).slice(0, 20);
 }
 
-function replyStartsWithDirectAnswer(reply: string, directAnswer: string): boolean {
-  const firstParagraph = reply.split(/\n\s*\n/)[0] ?? reply;
-  return normalizeVisibleText(firstParagraph).includes(normalizeVisibleText(directAnswer));
-}
-
 function sameStringSet(left: string[], right: string[]): boolean {
   if (left.length !== right.length) return false;
   const rightSet = new Set(right);
   return left.every((item) => rightSet.has(item));
-}
-
-function normalizeVisibleText(text: string): string {
-  return text
-    .replace(/\*\*/g, '')
-    .replace(/[，。；：、！？!?\s"'“”‘’（）()【】[\]<>《》]+/g, '')
-    .toLowerCase();
-}
-
-function containsInternalDetails(text: string): boolean {
-  return /\bsrc\/|knowledge\/_sources|caseId|runId|worker command|raw stdout|raw stderr|\bstdout\b|\bstderr\b|internal prompt|system prompt|内部\s*prompt|claude\s+-p/i.test(text);
-}
-
-function replyLacksSelectedClaimSignal(reply: string, selectedClaims: DiagnosticClaimWithId[]): boolean {
-  return selectedClaims.some((claim) => !claimSignals(claim.text).some((signal) => reply.includes(signal)));
-}
-
-type DiagnosticClaimWithId = DiagnosticResult['claims'][number];
-
-function claimSignals(text: string): string[] {
-  return Array.from(new Set(
-    text
-      .replace(/[，。；：:、（）()]/g, ' ')
-      .split(/\s+/)
-      .map((part) => part.trim())
-      .filter((part) => part.length >= 4)
-      .slice(0, 8),
-  ));
 }
 
 function workerFailedBeforeUsableResult(run: DiagnosticRun): boolean {

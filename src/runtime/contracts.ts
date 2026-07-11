@@ -12,3 +12,8 @@ export interface ReviewPresentationResult {
   reply: string;
   decision: RuntimeDecision;
 }
+
+export interface AcceptedUserTurn {
+  caseSession: StoredCase;
+  userMessageId: string;
+}

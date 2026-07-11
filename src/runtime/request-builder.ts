@@ -2,6 +2,7 @@ import type { SuperHelperConfig } from '../config.js';
 import type { CaseSession, DiagnosticRequest, DiagnosticResult, ResolvedTurnContext, UserPersona } from '../domain.js';
 import { buildDiagnosticRequestContext } from '../sessions/context-builder.js';
 import type { StoredCase } from '../sessions/case-repository.js';
+import { turnMessages } from '../sessions/turn-context-snapshot.js';
 import { buildAnswerGoal, followUpAnswerGoal } from './answer-goal.js';
 import { buildResolvedTurnContext } from './resolved-turn.js';
 
@@ -64,7 +65,7 @@ export function buildDiagnosticRequestFromResolvedTurn(input: {
     context: {
       isFollowUp: resolvedTurn.isFollowUp,
       currentUserMessage: resolvedTurn.latestUserMessage,
-      recentMessages: caseSession.messages.slice(-8).map((message) => ({
+      recentMessages: turnMessages(caseSession).slice(-8).map((message) => ({
         id: message.id,
         role: message.role,
         body: message.body,

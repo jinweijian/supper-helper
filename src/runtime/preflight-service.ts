@@ -10,6 +10,7 @@ import { buildAnswerGoal } from './answer-goal.js';
 import { buildLocalPreflightDecision, isGenericWorkspaceFollowUp, summarizePreflightDecision } from './preflight-gate.js';
 import { buildDiagnosticRequest } from './request-builder.js';
 import { reconcileResolvedTurnContext } from './resolved-turn.js';
+import { turnMessages } from '../sessions/turn-context-snapshot.js';
 
 export class PreflightService {
   constructor(
@@ -100,7 +101,7 @@ Do not include <think>, markdown, comments, explanations, or text outside the JS
                 }
               : undefined,
             localPreflightReadiness: summarizePreflightDecision(localDecision),
-            messages: caseSession.messages.slice(-8),
+            messages: turnMessages(caseSession).slice(-8),
             userMessage,
           },
           null,

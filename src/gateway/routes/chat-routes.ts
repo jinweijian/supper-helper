@@ -36,13 +36,14 @@ export async function handleChatRoutes(
   }
 
   if (body.async) {
-    const caseSession = agent.startUserTurn({
+    const turn = agent.startUserTurn({
       caseId: body.caseId,
       message: body.message,
       workspaceId: body.workspaceId,
       persona: body.persona,
     });
-    const userMessageId = caseSession.messages.at(-1)?.id;
+    const caseSession = turn.caseSession;
+    const userMessageId = turn.userMessageId;
     sendJson(res, 202, {
       accepted: true,
       caseId: caseSession.id,
@@ -53,7 +54,7 @@ export async function handleChatRoutes(
       persona: caseSession.userPersona,
       contextUsage: estimateCaseContextUsage(caseSession, resolveContextWindowTokens(config)),
     });
-    void agent.completeUserTurn(caseSession.id, body.message).catch((error) => {
+    void agent.completeUserTurn(caseSession.id, userMessageId).catch((error) => {
       agent.recordTurnFailure(caseSession.id, error, userMessageId);
     });
     return true;

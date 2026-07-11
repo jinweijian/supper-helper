@@ -532,7 +532,7 @@ For each run, build a compact context pack:
 - Same `caseId`: process runs serially.
 - Different `caseId`: may process in parallel.
 - Same workspace with multiple cases: share workspace configuration only, never case messages or conclusions.
-- Claude Code worker sessions are per run and disposable.
+- Claude Code worker sessions are Case-scoped: the first run creates a session with `--session-id`, and follow-up runs in the same Case reuse it with `--resume`. Each run still receives the complete authoritative `DiagnosticRequest`; session memory is subordinate to the current request. Different Cases never share a session.
 - Server-side context is the source of truth. Local browser state is only UI state.
 
 ## MCP Tool Rules
@@ -591,7 +591,7 @@ claude_worker:
   role: diagnostic_tool
   direct_user_response: false
   output_format: structured_json
-  per_run_session: true
+  case_scoped_session: true
   default_permission: read_only
 
 mcp:
@@ -602,7 +602,8 @@ mcp:
 memory:
   source_of_truth: super_helper_service
   isolate_by: [tenantId, userId, caseId, runId, workspaceId]
-  worker_session_persistence: false
+  worker_session_scope: case
+  worker_session_persistence: case_scoped_reuse
 ```
 
 ## Agent Model Preflight Prompt

@@ -1,6 +1,7 @@
 import type { SuperHelperConfig } from '../config.js';
 import type { UserPersona } from '../domain.js';
 import type { CaseRepository, StoredCase } from '../sessions/case-repository.js';
+import type { AcceptedUserTurn } from './contracts.js';
 import { CaseRuntimeEventRecorder } from './event-recorder.js';
 import { personaGuide, personaName } from './presenter.js';
 
@@ -31,7 +32,7 @@ export class SessionLifecycle {
     message: string;
     workspaceId?: string;
     persona?: UserPersona;
-  }): StoredCase {
+  }): AcceptedUserTurn {
     const caseSession = this.loadOrCreateCase(input);
     if (caseSession.archivedAt) {
       throw new Error('session is archived and cannot continue');
@@ -47,23 +48,21 @@ export class SessionLifecycle {
     if (isGenericTitle(caseSession.title)) {
       caseSession.title = titleFromMessage(input.message);
     }
-    this.store.addMessage(caseSession, { role: 'user', body: input.message });
+    const userMessage = this.store.addMessage(caseSession, { role: 'user', body: input.message });
     this.events.inputReceived(caseSession, input.message);
     this.events.personaApplied(caseSession, personaName(caseSession.userPersona), personaGuide(caseSession.userPersona));
     this.events.inputReviewStarted(caseSession, input.message);
     caseSession.status = 'ready_for_diagnosis';
     this.store.saveCase(caseSession);
-    return caseSession;
+    return { caseSession, userMessageId: userMessage.id };
   }
 
-  pendingUserMessageId(caseSession: StoredCase, userMessage: string): string | undefined {
-    const answered = new Set(
-      caseSession.messages
-        .filter((message) => message.role === 'helper' && message.replyToMessageId)
-        .map((message) => message.replyToMessageId),
-    );
-    const matching = caseSession.messages.filter((message) => message.role === 'user' && message.body === userMessage);
-    return matching.find((message) => !answered.has(message.id))?.id ?? matching.at(-1)?.id;
+  userMessageBody(caseSession: StoredCase, userMessageId: string): string {
+    const message = caseSession.messages.find((item) => item.id === userMessageId && item.role === 'user');
+    if (!message) {
+      throw new Error(`user message ${userMessageId} not found in case ${caseSession.id}`);
+    }
+    return message.body;
   }
 
   recordTurnFailure(caseId: string, error: unknown, replyToMessageId?: string): void {

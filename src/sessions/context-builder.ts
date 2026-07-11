@@ -1,11 +1,12 @@
 import type { DiagnosticRequest } from '../domain.js';
 import type { StoredCase } from './case-repository.js';
+import { turnMessages, turnRuns, turnUserMessageCount } from './turn-context-snapshot.js';
 
 export function buildDiagnosticRequestContext(
   caseSession: StoredCase,
   currentUserMessage: string,
 ): NonNullable<DiagnosticRequest['context']> {
-  const previousRuns = caseSession.runs
+  const previousRuns = turnRuns(caseSession)
     .filter((run) => Boolean(run.result))
     .slice(-3)
     .map((run) => ({
@@ -25,14 +26,14 @@ export function buildDiagnosticRequestContext(
       })),
     }));
 
-  const recentMessages = caseSession.messages.slice(-8).map((message) => ({
+  const recentMessages = turnMessages(caseSession).slice(-8).map((message) => ({
     id: message.id,
     role: message.role,
     body: truncateText(message.body, 1600),
     createdAt: message.createdAt,
   }));
 
-  const userMessageCount = caseSession.messages.filter((message) => message.role === 'user').length;
+  const userMessageCount = turnUserMessageCount(caseSession);
   return {
     isFollowUp: userMessageCount > 1 || previousRuns.length > 0,
     currentUserMessage: truncateText(currentUserMessage, 1600),

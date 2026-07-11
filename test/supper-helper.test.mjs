@@ -2486,10 +2486,10 @@ test('sync and async chat flows use the same runtime pipeline', async () => {
     const syncResponse = await agent.handleUserMessage({
       message: '请检查项目的运行时拆分是否可诊断。',
     });
-    const asyncCase = agent.startUserTurn({
+    const asyncTurn = agent.startUserTurn({
       message: '请检查项目的配置加载是否可诊断。',
     });
-    const asyncResponse = await agent.completeUserTurn(asyncCase.id, '请检查项目的配置加载是否可诊断。');
+    const asyncResponse = await agent.completeUserTurn(asyncTurn.caseSession.id, asyncTurn.userMessageId);
 
     const runtimePhases = (caseSession) =>
       caseSession.logs.map((event) => `${event.actor}:${event.phase}`).filter((phase) => phase !== 'system:conversation_started');
@@ -4013,16 +4013,16 @@ test('async same-case turns receive ordered reply-to helper messages', async () 
       },
     };
     const agent = new DiagnosticRuntime(config, store, worker);
-    const caseSession = agent.startUserTurn({ message: '第二个问题：解释 scripts' });
-    const secondId = caseSession.messages.at(-1).id;
-    agent.startUserTurn({ caseId: caseSession.id, message: '第三个问题：解释 dependencies' });
-    const thirdId = store.loadCase(caseSession.id).messages.at(-1).id;
+    const secondTurn = agent.startUserTurn({ message: '第二个问题：解释 scripts' });
+    const secondId = secondTurn.userMessageId;
+    const thirdTurn = agent.startUserTurn({ caseId: secondTurn.caseSession.id, message: '第三个问题：解释 dependencies' });
+    const thirdId = thirdTurn.userMessageId;
 
     await Promise.all([
-      agent.completeUserTurn(caseSession.id, '第二个问题：解释 scripts'),
-      agent.completeUserTurn(caseSession.id, '第三个问题：解释 dependencies'),
+      agent.completeUserTurn(secondTurn.caseSession.id, secondId),
+      agent.completeUserTurn(thirdTurn.caseSession.id, thirdId),
     ]);
-    const loaded = store.loadCase(caseSession.id);
+    const loaded = store.loadCase(secondTurn.caseSession.id);
     const helperReplies = loaded.messages.filter((message) => message.role === 'helper');
 
     assert.equal(helperReplies.length, 2);
@@ -4043,8 +4043,9 @@ test('async turn failures can reply to the accepted user message', () => {
       },
     };
     const agent = new DiagnosticRuntime(config, store, worker);
-    const caseSession = agent.startUserTurn({ message: '失败路径也要绑定这一条消息' });
-    const userMessageId = caseSession.messages.at(-1).id;
+    const failureTurn = agent.startUserTurn({ message: '失败路径也要绑定这一条消息' });
+    const caseSession = failureTurn.caseSession;
+    const userMessageId = failureTurn.userMessageId;
 
     agent.recordTurnFailure(caseSession.id, new Error('worker failed'), userMessageId);
     const loaded = store.loadCase(caseSession.id);

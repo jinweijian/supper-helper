@@ -6,7 +6,7 @@ import type { CaseRepository, StoredCase } from '../sessions/case-repository.js'
 import type { DiagnosticWorker } from '../workers/diagnostic-worker.js';
 import { resolveAgentConfig } from './agent-configs.js';
 import { CaseCurationService } from './case-curation-service.js';
-import type { RuntimeTurnResponse } from './contracts.js';
+import type { RuntimeTurnResponse, AcceptedUserTurn } from './contracts.js';
 import { CaseRuntimeEventRecorder } from './event-recorder.js';
 import { ExperienceTurnService } from './experience-turn.js';
 import { KnowledgeTurnService } from './knowledge-turn.js';
@@ -16,6 +16,7 @@ import { RagAnswerabilityService } from './rag-answerability-service.js';
 import { ReviewPresentationService } from './review-presentation.js';
 import { SessionLifecycle } from './session-lifecycle.js';
 import { CaseTurnQueue } from './turn-queue.js';
+import { bindTurnContextCutoff, clearTurnContextCutoff } from '../sessions/turn-context-snapshot.js';
 import { WorkerDiagnosisService } from './worker-diagnosis.js';
 
 export interface AgentResponse extends RuntimeTurnResponse {}
@@ -80,8 +81,8 @@ export class DiagnosticRuntime {
     workspaceId?: string;
     persona?: UserPersona;
   }): Promise<AgentResponse> {
-    const caseSession = this.startUserTurn(input);
-    return this.completeUserTurn(caseSession.id, input.message);
+    const turn = this.startUserTurn(input);
+    return this.completeUserTurn(turn.caseSession.id, turn.userMessageId);
   }
 
   loadCase(caseId: string): StoredCase | undefined {
@@ -93,22 +94,36 @@ export class DiagnosticRuntime {
     message: string;
     workspaceId?: string;
     persona?: UserPersona;
-  }): StoredCase {
+  }): AcceptedUserTurn {
     return this.sessions.startUserTurn(input);
   }
 
-  async completeUserTurn(caseId: string, userMessage: string): Promise<AgentResponse> {
-    return this.turnQueue.run(caseId, () => this.completeUserTurnNow(caseId, userMessage));
+  async completeUserTurn(caseId: string, userMessageId: string): Promise<AgentResponse> {
+    return this.turnQueue.run(caseId, () => this.completeUserTurnNow(caseId, userMessageId));
   }
 
   recordTurnFailure(caseId: string, error: unknown, replyToMessageId?: string): void {
     this.sessions.recordTurnFailure(caseId, error, replyToMessageId);
   }
 
-  private async completeUserTurnNow(caseId: string, userMessage: string): Promise<AgentResponse> {
+  private async completeUserTurnNow(caseId: string, userMessageId: string): Promise<AgentResponse> {
     const caseSession = this.sessions.requireActiveCase(caseId);
-    const replyToMessageId = this.sessions.pendingUserMessageId(caseSession, userMessage);
+    const userMessage = this.sessions.userMessageBody(caseSession, userMessageId);
+    const replyToMessageId = userMessageId;
 
+    bindTurnContextCutoff(caseSession, userMessageId);
+    try {
+      return await this.runTurnPipeline(caseSession, userMessage, replyToMessageId);
+    } finally {
+      clearTurnContextCutoff(caseSession);
+    }
+  }
+
+  private async runTurnPipeline(
+    caseSession: StoredCase,
+    userMessage: string,
+    replyToMessageId: string,
+  ): Promise<AgentResponse> {
     const curationResponse = this.caseCuration.answer(caseSession, userMessage, replyToMessageId);
     if (curationResponse) {
       return curationResponse;

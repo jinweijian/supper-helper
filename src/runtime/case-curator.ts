@@ -4,6 +4,7 @@ import type { DiagnosticClaim, DiagnosticResult, DiagnosticRun, Evidence } from 
 import { dirtyFlagPath } from '../knowledge/paths.js';
 import { routeKnowledgeQuestion } from '../knowledge/taxonomy.js';
 import type { StoredCase } from '../sessions/case-repository.js';
+import { turnMessages, turnRuns } from '../sessions/turn-context-snapshot.js';
 
 export interface SolvedCaseDraft {
   documentId: string;
@@ -218,18 +219,18 @@ ${blockQuote(input.confirmationMessage)}
 }
 
 function latestRunWithResult(caseSession: StoredCase): DiagnosticRun | undefined {
-  return [...caseSession.runs].reverse().find((run) => Boolean(run.result));
+  return [...turnRuns(caseSession)].reverse().find((run) => Boolean(run.result));
 }
 
 function originalUserQuestion(caseSession: StoredCase): string | undefined {
-  return caseSession.messages.find((message) => (
+  return turnMessages(caseSession).find((message) => (
     message.role === 'user' &&
     !isResolutionConfirmation(message.body)
   ))?.body;
 }
 
 function latestHelperReply(caseSession: StoredCase): string | undefined {
-  return [...caseSession.messages].reverse().find((message) => message.role === 'helper')?.body;
+  return [...turnMessages(caseSession)].reverse().find((message) => message.role === 'helper')?.body;
 }
 
 function inferModuleId(
@@ -282,7 +283,7 @@ function moduleFromKnowledgeSource(source: string): string | undefined {
 
 function restrictedCase(caseSession: StoredCase, result: DiagnosticResult): boolean {
   const text = [
-    ...caseSession.messages.map((message) => message.body),
+    ...turnMessages(caseSession).map((message) => message.body),
     result.summary,
     ...result.claims.map((claim) => claim.text),
   ].join('\n');

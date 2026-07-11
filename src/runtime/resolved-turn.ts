@@ -3,6 +3,7 @@ import type {
   ResolvedTurnStatement,
   CaseSession,
 } from '../domain.js';
+import { turnUserMessages, turnRuns } from '../sessions/turn-context-snapshot.js';
 
 const UNKNOWN_PATTERN = /^(不清楚|不知道|没有|暂时不清楚|unknown|not sure)$/i;
 const HYPOTHESIS_PATTERN = /是不是|是否可能|会不会|我猜|可能是|怀疑|难道|会否/;
@@ -14,19 +15,20 @@ export function buildResolvedTurnContext(input: {
   caseSession: CaseSession;
   latestUserMessage: string;
 }): ResolvedTurnContext {
-  const userMessages = input.caseSession.messages.filter((message) => message.role === 'user').slice(-12);
+  const userMessages = turnUserMessages(input.caseSession).slice(-12);
   const latest = [...userMessages].reverse().find((message) => message.body === input.latestUserMessage) ?? userMessages.at(-1);
   const previous = [...userMessages]
     .reverse()
     .find((message) => message.id !== latest?.id && !UNKNOWN_PATTERN.test(message.body.trim()));
   const latestText = input.latestUserMessage.trim();
   const isUnknown = UNKNOWN_PATTERN.test(latestText);
-  const isFollowUp = userMessages.length > 1 || input.caseSession.runs.length > 0;
+  const isFollowUp = userMessages.length > 1 || turnRuns(input.caseSession).length > 0;
+  const allMessages = input.caseSession.messages;
   const latestMessageIndex = latest
-    ? input.caseSession.messages.findIndex((message) => message.id === latest.id)
+    ? allMessages.findIndex((message) => message.id === latest.id)
     : -1;
   const precedingMessage = latestMessageIndex > 0
-    ? input.caseSession.messages[latestMessageIndex - 1]
+    ? allMessages[latestMessageIndex - 1]
     : undefined;
   const answersClarification = Boolean(
     previous &&

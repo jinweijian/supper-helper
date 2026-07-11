@@ -1,6 +1,7 @@
 import type { CaseSession, DiagnosticRequest, HelperAgentConfig } from '../domain.js';
 import { buildDiagnosticRequestFromResolvedTurn } from './request-builder.js';
 import { buildResolvedTurnContext } from './resolved-turn.js';
+import { turnMessages } from '../sessions/turn-context-snapshot.js';
 
 export interface PreflightInput {
   caseSession: CaseSession;
@@ -55,12 +56,13 @@ function hasActionableSignal(text: string): boolean {
 }
 
 export function preflight(input: PreflightInput): PreflightDecision {
-  const contextText = input.caseSession.messages
+  const cutoffMessages = turnMessages(input.caseSession);
+  const contextText = cutoffMessages
     .filter((message) => message.role === 'user')
     .map((message) => message.body)
     .join('\n');
   const isUnknownAnswer = /^(不清楚|不知道|没有|暂时不清楚|unknown|not sure)$/i.test(input.userMessage.trim());
-  const hasPendingHelperQuestion = input.caseSession.messages.some(
+  const hasPendingHelperQuestion = cutoffMessages.some(
     (message) => message.role === 'helper' && /缺少|请补充|不能判断/.test(message.body),
   );
   const textForSignals = isUnknownAnswer ? contextText : `${contextText}\n${input.userMessage}`;

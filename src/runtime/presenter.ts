@@ -10,6 +10,68 @@ export function formatPreflightQuestion(question: string, missingInfo: string[])
   return `我现在还不能判断原因，缺少关键信息：${missingInfo.join('、')}。\n\n${question}`;
 }
 
+export interface PresentationPlan {
+  claimIds: string[];
+  evidenceIds: string[];
+  directAnswerClaimIds: string[];
+}
+
+export function renderPresentationPlan(input: {
+  plan: PresentationPlan;
+  result: DiagnosticResult;
+  persona: UserPersona;
+}): string {
+  const { plan, result, persona } = input;
+  const claimsById = new Map(result.claims.map((claim) => [claim.id!, claim]));
+  const selectedClaims = plan.claimIds
+    .map((id) => claimsById.get(id))
+    .filter((claim): claim is DiagnosticClaim => Boolean(claim))
+    .filter((claim) => claim.role !== 'process_note');
+
+  const primaryClaims = selectedClaims.filter(isPrimaryAnswerClaim);
+  const supportingClaims = selectedClaims.filter(
+    (claim) => !isPrimaryAnswerClaim(claim) && (claim.type === 'fact' || claim.type === 'inference'),
+  );
+  const nextActionClaims = selectedClaims.filter((claim) => claim.role === 'next_action');
+  const unknownClaims = selectedClaims.filter((claim) => claim.type === 'unknown');
+
+  const lines: string[] = [];
+  const conclusionText = primaryClaims.length > 0
+    ? primaryClaims.map((claim) => claim.text).join('；')
+    : supportingClaims.length > 0
+      ? supportingClaims.map((claim) => claim.text).join('；')
+      : '当前没有通过审核的事实结论。';
+
+  const isPartial = result.recommendedNextAction !== 'final_answer' || result.status !== 'concluded' || primaryClaims.length === 0;
+  const conclusionLabel = isPartial ? '初步判断' : '结论';
+  lines.push(`**${conclusionLabel}：${sanitizeForPersona(conclusionText, persona)}**`);
+
+  if (supportingClaims.length > 0 && primaryClaims.length > 0) {
+    lines.push('', `**定位依据：** ${supportingClaims.map((claim) => sanitizeForPersona(claim.text, persona)).join('；')}`);
+  }
+
+  if (nextActionClaims.length > 0) {
+    lines.push('', `**下一步：** ${nextActionClaims.map((claim) => claim.text).join('；')}`);
+  }
+
+  if (unknownClaims.length > 0) {
+    lines.push('', `**未知项：** ${unknownClaims.map((claim) => claim.text).join('；')}`);
+  }
+
+  if (result.missingInfo.length > 0) {
+    lines.push('', `**仍需确认：** ${result.missingInfo.join('、')}`);
+  }
+
+  return lines.join('\n');
+}
+
+function sanitizeForPersona(text: string, persona: UserPersona): string {
+  if (persona === 'developer') return text;
+  return redactInternalKnowledgePath(text)
+    .replace(/\bsrc\/[^\s，。；)）]+/g, '相关系统位置')
+    .replace(/\b[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+\b/g, '相关系统配置');
+}
+
 export function ruleBasedReviewAndFormat(
   result: DiagnosticResult,
   persona: UserPersona,
@@ -44,10 +106,6 @@ export function ruleBasedReviewAndFormat(
     });
   }
 
-  if (/Q2|event_v2|finished_prompt|CourseTaskEventV2/i.test(userGoal ?? result.summary)) {
-    return formatQ2Result(result, unsupportedFacts);
-  }
-
   const groundedConclusion = primaryClaim ?? '当前没有通过审核的事实结论';
   const mode = isFinalReviewedAnswer(result, supportedClaims) ? 'final' : 'partial';
   return formatPersonaReply({
@@ -72,18 +130,19 @@ function isPrimaryAnswerClaim(claim: DiagnosticClaim): boolean {
 }
 
 function selectGroundedPrimaryClaim(supportedClaims: DiagnosticClaim[]): string | undefined {
-  const primaryClaims = supportedClaims
+  const eligible = supportedClaims.filter((claim) => claim.role !== 'process_note');
+  const primaryClaims = eligible
     .filter(isPrimaryAnswerClaim)
     .map((claim) => claim.text)
     .filter(Boolean);
   if (primaryClaims.length > 0) {
-    const supportingClaims = supportedClaims
+    const supportingClaims = eligible
       .filter((claim) => !isPrimaryAnswerClaim(claim) && (claim.type === 'fact' || claim.type === 'inference'))
       .map((claim) => claim.text)
       .filter(Boolean);
     return [...primaryClaims, ...supportingClaims].join('；');
   }
-  return supportedClaims.find((claim) => claim.type === 'fact' || claim.type === 'inference')?.text;
+  return eligible.find((claim) => claim.type === 'fact' || claim.type === 'inference')?.text;
 }
 
 export function formatReviewFailureFallback(
@@ -387,62 +446,6 @@ function customerActionItems(conclusion: string, mode: ReplyMode): string[] {
 
 function redactInternalKnowledgePath(text: string): string {
   return text.replace(/knowledge\/(?:_sources|faq|whitepapers)\/[^\s，。；)）\]]+/g, '业务资料');
-}
-
-function formatQ2Result(result: DiagnosticResult, unsupportedFacts: DiagnosticClaim[]): string {
-  const claimTexts = result.claims.filter((claim) => claim.type !== 'fact' || claim.evidenceIds.length > 0).map((claim) => claim.text);
-  const pick = (...patterns: RegExp[]): string[] =>
-    claimTexts.filter((text) => patterns.some((pattern) => pattern.test(text)));
-  const section = (title: string, items: string[], fallback = '当前结构化证据不足，无法确认。'): string =>
-    `## ${title}\n\n${items.length ? items.map((item) => `- ${item}`).join('\n') : fallback}`;
-
-  const entries = pick(/入口|CourseTaskEventV2|TaskController|finished_prompt/i);
-  const start = pick(/^start|start事件|createLearnFlow|学习流/i);
-  const doing = pick(/^doing|doing事件|watchData|duration|trigger/i);
-  const finishedPrompt = pick(/finished_prompt|taskFinishedPromptAction|enableFinish|nextTask|learningProgress/i);
-  const dataFlow = pick(/sign|learn_flow|record|task_result|lastLearnTime|isFinished|finishTaskResult|watching/i);
-  const serviceRoles = pick(/DataCollectService|TaskService|TaskResultService|LearningDataAnalysisService|LearnControlService/i);
-
-  const evidence = result.evidence.length
-    ? result.evidence.map((item) => `- ${item.source}: ${item.summary}（${item.confidence}）`).join('\n')
-    : '- 暂无可展示证据。';
-  const risks = [
-    ...pick(/watchData\.duration|enableFinish|finishType|live|防多开|旧版events/i),
-    '如果 learnedTime/watchTime 与活动 finishType 不匹配，可能导致任务看似有学习记录但不满足完成条件。',
-    '如果前端上报的 lastLearnTime、duration 或 watchData.duration 异常，可能造成学习时长偏差。',
-  ];
-  const gaps = [
-    ...result.missingInfo,
-    ...unsupportedFacts.map((claim) => `未采纳：${claim.text}`),
-  ];
-
-  return `# Q2 分析结果
-
-## 一句话结论
-
-${result.claims.find((claim) => claim.type === 'fact' || claim.type === 'inference')?.text ?? '当前没有通过审核的事实结论。'}
-
-${section('接口入口', entries)}
-
-${section('start 流程', start)}
-
-${section('doing 流程', doing)}
-
-${section('finished_prompt 流程', finishedPrompt)}
-
-${section('核心状态与数据流', dataFlow)}
-
-## 关键文件和方法
-
-${evidence}
-
-${section('相关服务职责', serviceRoles)}
-
-${section('可能导致学习时长异常或任务无法完成的原因', Array.from(new Set(risks)))}
-
-## 不确定点与证据缺口
-
-${gaps.length ? gaps.map((item) => `- ${item}`).join('\n') : '- 暂无阻塞性缺口；无 evidenceIds 的说法已自动排除。'}`;
 }
 
 function workerFailedBeforeResult(trace: WorkerTrace): boolean {

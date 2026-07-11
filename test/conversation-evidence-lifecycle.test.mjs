@@ -656,7 +656,7 @@ test('model presentation reply is used and preserves multiple reviewed claims', 
     assert.match(response.assistantMessage, /后台管理 → 教务 → 参数设置/);
     assert.match(response.assistantMessage, /\/multi_class\/setting/);
     assert.match(response.assistantMessage, /admin_v2_multi_class_setting_manage/);
-    assert.match(response.assistantMessage, /基本信息、价格、封面、服务、班主任、教师、助教、课程管理和学员管理/);
+    assert.match(response.assistantMessage, /基本信息、价格、封面、服务、班主任、教师、助教、课程管理、学员管理/);
     assert.doesNotMatch(response.assistantMessage, /配置或使用问题|对业务的影响|你可以怎么处理/);
     const parsed = response.caseSession.logs.find((event) => event.phase === 'model_review_result')?.detail?.parsed;
     assert.equal(parsed.accepted, true);
@@ -909,7 +909,7 @@ test('sync first turn and async unknown follow-up share one resolved query acros
     const originalQuestion = '课程发布后学员为什么看不到入口？';
     const first = await agent.handleUserMessage({ message: originalQuestion });
     const accepted = agent.startUserTurn({ caseId: first.caseSession.id, message: '不清楚' });
-    const second = await agent.completeUserTurn(accepted.id, '不清楚');
+    const second = await agent.completeUserTurn(accepted.caseSession.id, accepted.userMessageId);
 
     assert.equal(requests.length, 2);
     assert.equal(requests[1].userGoal, originalQuestion);
@@ -918,7 +918,7 @@ test('sync first turn and async unknown follow-up share one resolved query acros
     assert.equal(requests[1].unknowns.includes('不清楚'), true);
     assert.equal(second.caseSession.messages.some((message) => message.role === 'user' && message.body === '不清楚'), true);
 
-    const phase = (name) => second.caseSession.logs.find((event) => event.phase === name && event.createdAt >= accepted.updatedAt);
+    const phase = (name) => second.caseSession.logs.find((event) => event.phase === name && event.createdAt >= accepted.caseSession.updatedAt);
     assert.equal(phase('experience_started').detail.message, originalQuestion);
     assert.equal(phase('knowledge_router_started').detail.message, originalQuestion);
     assert.equal(phase('diagnostic_request').detail.userGoal, originalQuestion);
