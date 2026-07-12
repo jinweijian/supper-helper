@@ -37,6 +37,18 @@ describe('dashboard composables', () => {
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
+  it('publishes every polled session and interrupts when diagnosis stops without a reply', async () => {
+    const fetcher = vi.fn()
+      .mockImplementationOnce(() => response({ session: { id: 'case_a', status: 'queued', messages: [] } }))
+      .mockImplementationOnce(() => response({ session: { id: 'case_a', status: 'diagnosing', messages: [] } }))
+      .mockImplementationOnce(() => response({ session: { id: 'case_a', status: 'partial', messages: [] } }));
+    const chat = useChat({ fetcher, pollDelayMs: 0 });
+    const seen: string[] = [];
+    await expect(chat.poll('case_a', 'msg_user', (session) => seen.push(session.status))).rejects.toThrow('回答已中断');
+    expect(seen).toEqual(['queued', 'diagnosing', 'partial']);
+    expect(chat.progress.value.state).toBe('interrupted');
+  });
+
   it('identifies the accepted user turn when a reloaded session is active', () => {
     expect(pendingUserMessageId({ id: 'case_a', title: 'A', status: 'diagnosing', runs: [], messages: [
       { id: 'msg_old', role: 'assistant', body: '旧答复' },

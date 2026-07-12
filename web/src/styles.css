@@ -70,6 +70,20 @@ pre { margin: 0; max-width: 100%; overflow: auto; white-space: pre-wrap; overflo
 .message pre { padding: 13px 15px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .message.user pre { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
 .thinking { max-width: 780px; margin: 0 auto; color: var(--muted); }
+.progress-card { display: grid; gap: 11px; max-width: 780px; margin: 0 auto 15px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.progress-card.is-active { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent); }
+.progress-card.interrupted { border-color: color-mix(in srgb, var(--danger) 50%, var(--line)); }
+.progress-card header, .progress-card footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.progress-card header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.progress-card footer { flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+.progress-track { display: block; height: 7px; overflow: hidden; border-radius: 999px; background: var(--surface-muted); }
+.progress-track > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .25s ease; }
+.progress-card.is-active .progress-track > span { animation: progress-pulse 1.5s ease-in-out infinite; }
+.progress-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+.progress-steps span { overflow: hidden; padding: 5px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 11px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.progress-steps .done, .progress-steps .current { color: var(--accent); border-color: var(--accent); }
+.progress-steps .current { background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+@keyframes progress-pulse { 50% { opacity: .62; } }
 .composer { margin: 0 clamp(16px, 5vw, 72px) 18px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .composer textarea { min-height: 72px; resize: vertical; border: 0; }
 .composer-actions { display: flex; align-items: end; justify-content: space-between; gap: 12px; }

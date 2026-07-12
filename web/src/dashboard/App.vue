@@ -26,7 +26,7 @@ onMounted(async () => {
   const current = sessions.current.value;
   const pending = current ? pendingUserMessageId(current) : undefined;
   if (current && pending) {
-    chat.poll(current.id, pending).then((settled) => {
+    chat.poll(current.id, pending, (session) => { if (sessions.current.value?.id === session.id) sessions.current.value = session; }).then((settled) => {
       sessions.current.value = settled;
       return sessions.list();
     }).catch(() => undefined);
@@ -47,7 +47,7 @@ async function send(message: string, persona: string): Promise<void> {
       workspaceId: current?.workspaceId || 'current',
       message,
       persona,
-    });
+    }, (session) => { if (!sessions.current.value || sessions.current.value.id === session.id) sessions.current.value = session; });
     sessions.current.value = next;
     await sessions.list();
     if (!current) history.replaceState({}, '', `/sessions/${encodeURIComponent(next.id)}`);
@@ -91,7 +91,7 @@ function withCurrentKnowledge(action: 'check' | 'bind' | 'reindex'): void {
         @action="sessions.action"
         @remove="sessions.remove"
       />
-      <ChatPanel :session="sessions.current.value" :sending="chat.sending.value" @send="send">
+      <ChatPanel :session="sessions.current.value" :sending="chat.sending.value" :progress="chat.progress.value" @send="send">
         <template #actions><button type="button" :disabled="!sessions.current.value" @click="openLogs">日志</button></template>
       </ChatPanel>
       <InsightPanel

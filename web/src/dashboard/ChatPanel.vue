@@ -2,8 +2,10 @@
 import { nextTick, ref, watch } from 'vue';
 import type { SessionDto } from '../shared/contracts';
 import RichAnswer from './RichAnswer.vue';
+import ChatProgressCard from './ChatProgressCard.vue';
+import type { ChatProgressState } from './chat-progress';
 
-const props = defineProps<{ session?: SessionDto; sending: boolean }>();
+const props = defineProps<{ session?: SessionDto; sending: boolean; progress?: ChatProgressState }>();
 const emit = defineEmits<{ send: [message: string, persona: string] }>();
 const message = ref('');
 const persona = ref('operations');
@@ -48,7 +50,7 @@ function onKeydown(event: KeyboardEvent): void {
         <pre v-if="item.role === 'user'">{{ item.body }}</pre>
         <RichAnswer v-else :text="item.body" />
       </article>
-      <div v-if="sending" class="thinking" role="status">正在审核证据并组织答复…</div>
+      <ChatProgressCard v-if="progress && ['running', 'interrupted'].includes(progress.state)" :progress="progress" />
     </section>
     <form class="composer" @submit.prevent="submit">
       <label class="sr-only" for="chat-input">输入问题</label>
