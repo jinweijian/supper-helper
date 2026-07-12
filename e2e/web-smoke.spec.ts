@@ -11,15 +11,22 @@ test('Dashboard uses production assets and real Gateway workflows', async ({ pag
   await expect(page.getByRole('heading', { name: '新对话' })).toBeVisible();
   await page.getByLabel('输入问题').fill('请检查当前项目状态');
   await page.getByRole('button', { name: '发送' }).click();
+  await expect(page.getByRole('status')).toContainText('已耗时');
+  await expect(page.getByRole('status')).toContainText('估计');
   await expect(page.getByText('helper', { exact: true })).toBeVisible();
-  expect(requests.filter((request) => request === 'GET /api/knowledge/health')).toHaveLength(0);
+  await expect(page.getByText('项目状态可以继续检查。')).toBeVisible();
+  await expect(page.getByText('worker-secret-output')).toHaveCount(0);
+  expect(requests.filter((request) => request === 'GET /api/knowledge/health')).toHaveLength(1);
   await page.getByRole('tab', { name: '知识健康' }).click();
   await page.getByRole('button', { name: '测试检索' }).click();
-  await expect.poll(() => requests.filter((request) => request === 'GET /api/knowledge/health').length).toBe(1);
+  await expect.poll(() => requests.filter((request) => request === 'GET /api/knowledge/health').length).toBe(2);
 
   const logButton = page.getByRole('button', { name: '日志', exact: true });
   await logButton.click();
   await expect(page.getByRole('dialog', { name: '诊断日志' })).toBeVisible();
+  await expect(page.locator('details.log-card').first()).toBeVisible();
+  await page.getByRole('button', { name: '全部收起' }).click();
+  await expect(page.locator('details.log-card[open]')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog', { name: '诊断日志' })).toBeHidden();
   await expect(logButton).toBeFocused();
@@ -28,19 +35,28 @@ test('Dashboard uses production assets and real Gateway workflows', async ({ pag
   await settingsButton.click();
   await expect(page.getByRole('dialog', { name: '配置' })).toBeVisible();
   await expect(page.getByText('配置已加载')).toBeVisible();
-  const baseUrl = page.getByLabel('Base URL', { exact: true });
-  const model = page.getByLabel('模型', { exact: true });
-  await baseUrl.fill('https://api.example.test/v1');
+  const modelGroup = page.getByRole('group', { name: 'Agent 模型' });
+  const baseUrl = modelGroup.getByLabel('Base URL', { exact: true });
+  const model = modelGroup.getByLabel('模型', { exact: true });
+  await baseUrl.fill('http://127.0.0.1:1/v1');
   await model.fill('e2e-model');
-  await expect(baseUrl).toHaveValue('https://api.example.test/v1');
+  await expect(baseUrl).toHaveValue('http://127.0.0.1:1/v1');
   await expect(model).toHaveValue('e2e-model');
-  await page.getByRole('button', { name: '保存配置' }).click();
+  await page.getByRole('button', { name: '测试模型', exact: true }).click();
+  await expect(modelGroup.locator('.status-banner')).not.toHaveText('');
+  await page.getByRole('button', { name: '保存模型' }).click();
   await expect(page.getByText('模型配置已保存')).toBeVisible();
+  await page.getByRole('button', { name: '保存 Embedding' }).click();
+  await expect(page.getByText('Embedding 配置已保存')).toBeVisible();
+  await page.getByRole('button', { name: '保存 Rerank' }).click();
+  await expect(page.getByText('Rerank 配置已保存')).toBeVisible();
+  await page.getByRole('button', { name: '保存 Claude' }).click();
+  await expect(page.getByText('Claude 配置已保存')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(settingsButton).toBeFocused();
 
   expect(requests).toEqual(expect.arrayContaining([
-    'POST /api/sessions', 'POST /api/chat', 'GET /api/session', 'GET /api/knowledge/health', 'GET /api/logs', 'GET /api/settings', 'POST /api/settings/model',
+    'POST /api/sessions', 'POST /api/chat', 'GET /api/session', 'GET /api/knowledge/health', 'GET /api/logs', 'GET /api/settings', 'GET /api/agents', 'POST /api/settings/model/test', 'POST /api/settings/model', 'POST /api/settings/embedding', 'POST /api/settings/rerank', 'POST /api/settings/claude',
   ]));
 });
 

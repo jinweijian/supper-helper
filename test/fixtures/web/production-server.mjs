@@ -98,7 +98,24 @@ function makeRun(status) {
 }
 function publish(type) { for (const listener of subscribers) listener({ type, runId: run.id, at: new Date().toISOString(), run }); }
 
-const server = await startServer({ config, onboarding });
+const workerFactory = () => ({
+  async diagnose() {
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    const now = new Date().toISOString();
+    return {
+      result: {
+        status: 'concluded',
+        summary: '项目状态已完成只读检查',
+        missingInfo: [],
+        evidence: [{ id: 'ev_e2e', kind: 'workspace', source: 'README.md', summary: '生产 fixture 的已审核证据', confidence: 'high' }],
+        claims: [{ id: 'claim_e2e', type: 'fact', role: 'primary_answer', text: '项目状态可以继续检查。', evidenceIds: ['ev_e2e'], answers: ['direct_answer'] }],
+        recommendedNextAction: 'final_answer',
+      },
+      trace: { command: 'fixture-worker', cwd: workspace, stdout: 'worker-secret-output', stderr: '', startedAt: now, finishedAt: now },
+    };
+  },
+});
+const server = await startServer({ config, onboarding, workerFactory });
 async function stop() { await server.close(); rmSync(root, { recursive: true, force: true }); process.exit(0); }
 process.on('SIGTERM', stop);
 process.on('SIGINT', stop);
