@@ -49,6 +49,18 @@ Dashboard 从单文件 UI 迁移到 Vue 后，保留了页面骨架和 HTTP 接�
 | 测试连接的进行中反馈 | Form 被 loading 条件卸载 | Form 保持挂载，显示具体动作状态与耗时 |
 | 测试当前未保存输入 | 事件已传 payload，但反馈不明确 | 请求使用当前表单 payload，并有契约测试 |
 | 测试成功/失败结果 | 通用短文案或表单消失 | 展示安全、具体、动作级结果 |
+| 回答富文本与证据卡 | Markdown 标记原样显示，证据结构消失 | 安全渲染回答结构，证据按需展开 |
+| 右侧审计面板 | 完整 Run JSON 平铺 | 只展示面向用户的进度、证据和缺失信息 |
+| 内部数据边界 | DiagnosticRequest、WorkerTrace 等进入可见面板 | 主界面不展示内部约束、command、cwd、stdout 或原始 trace |
+| 上下文窗口 | 用量与满额状态不可见 | 展示用量，达到限制时禁用输入并解释 |
+| Case 状态与阶段 | 原始英文状态，无阶段轨道 | 中文状态标签、Workspace 和五阶段轨道恢复 |
+| 归档会话 | UI 仍允许编辑发送 | 输入和发送在归档态禁用并解释 |
+| 处理中筛选 | 遗漏 queued / ready_for_diagnosis | 所有 active 状态均可被筛出 |
+| 知识健康概览 | 默认 `{}` 和原始 JSON | 打开会话即加载离线 local health，并以健康卡/知识树展示 |
+| 显式测试检索 | 使用可能截断的会话标题 | 使用最新用户问题，且只在明确点击后触发 Retrieval probe |
+| 完整设置编辑 | 仅模型基础字段可编辑保存 | 恢复模型高级项、Embedding、Rerank、Claude 和 RAG 开关 |
+| 多 Agent 摘要 | UI 入口丢失 | 恢复 `/api/agents` 的只读配置摘要 |
+| Persona 连续性 | 新建会话未携带当前 persona | 创建与首次发送使用同一 persona |
 
 ## 问答进度设计
 
@@ -110,6 +122,28 @@ Dashboard 从单文件 UI 迁移到 Vue 后，保留了页面骨架和 HTTP 接�
 
 默认展开最新 3 条，其余折叠。用户手动展开/收起的 ID 在刷新后保留；新出现的最近日志可按默认规则展开。提供“全部展开”和“全部收起”。使用原生 `<details>/<summary>` 或等价键盘可操作组件。
 
+## 回答与审计面板设计
+
+### 回答展示
+
+恢复旧版的回答信息层级，但使用安全、受限的 Vue renderer：支持段落、标题、列表、强调、行内代码和代码块，不允许原始 HTML。若 Run result 提供已审核 evidence/claims，则在回答下方以折叠证据卡展示来源、置信度和摘要；不得从 WorkerTrace 或未审核 claim 生成内容。
+
+### 右侧审计面板
+
+禁止 `JSON.stringify(latestRun)` 直接进入主界面。进度页只消费 session status、agentActivity 和安全进度模型；证据页只消费最新已审核 result 的 accepted fact/inference、evidence 与 missingInfo；知识健康页只消费 public knowledge health DTO。
+
+DiagnosticRequest、deepQuery 内部约束、Worker command/cwd/stdout、provider payload 和原始 model output 只能留在脱敏日志详情，不得进入默认 Dashboard 面板。
+
+### Case 上下文状态
+
+恢复 Workspace、中文状态、五阶段轨道和 contextUsage meter。`contextUsage.available === false` 或会话已归档时禁用输入，显示具体原因。处理中筛选必须覆盖 `queued`、`ready_for_diagnosis` 和 `diagnosing`。
+
+## 知识健康设计
+
+打开或切换会话时只加载不联网的 local health，不自动执行 Retrieval probe。健康面板恢复服务绑定、索引、检索、Embedding 状态卡和知识树；空数据使用解释性空状态，不显示 `{}`。
+
+“测试检索”是显式远程/检索动作，query 使用最新用户消息而不是可能截断或泛化的会话标题。绑定和重建继续使用当前 workspace，并展示动作级 loading、成功和失败。
+
 ## 配置检测设计
 
 ### 所有权
@@ -126,6 +160,18 @@ Dashboard 从单文件 UI 迁移到 Vue 后，保留了页面骨架和 HTTP 接�
 - 成功显示 provider/model 等安全摘要；失败显示经过 API 归一化的安全错误。
 - 所有 resolve/reject 路径必须结束 running 状态。
 - 用户关闭再打开抽屉时，可以看到最近一次检测结果，但不会自动重复调用。
+
+### 完整配置能力
+
+Vue 设置页必须恢复当前公开 Settings contract 已支持的编辑能力：
+
+- 模型：provider、model、base URL、API 类型、API Key/SecretRef 行为、maxTokens、temperature、contextWindowTokens、RAG 可回答性开关；
+- Embedding：enabled、provider、model、base URL、API Key、dimensions、distance 与现有公开参数；
+- Rerank：enabled、provider、model、base URL、API Key、topN 与现有公开参数；
+- Claude：timeout、可选预算、session busy 重试次数与间隔；
+- Agents：恢复 `/api/agents` 只读摘要，不允许从 UI 修改产品 Agent prompt。
+
+保存操作应按模块调用既有 Settings API，并分别显示结果；部分失败不能伪装成全部成功。
 
 ## 组件边界
 
@@ -160,6 +206,10 @@ Dashboard 从单文件 UI 迁移到 Vue 后，保留了页面骨架和 HTTP 接�
    - 模拟中断后明确显示中断；
    - 日志以折叠卡片出现并可展开；
    - 模型测试发出真实本地 fixture HTTP 请求，并展示进行中与结果。
+   - 回答 Markdown 正确渲染且 evidence 可折叠，不显示内部 raw Run/WorkerTrace。
+   - 打开会话自动展示 local health，测试检索使用最新用户消息且只调用一次。
+   - 完整模型、Embedding、Rerank 与 Claude 设置能编辑并命中各自 API。
+   - 归档、上下文满额、处理中筛选和 persona 创建行为与旧版能力一致。
 
 最终运行：
 
