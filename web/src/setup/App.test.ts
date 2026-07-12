@@ -32,4 +32,35 @@ describe('Setup API Key 提示', () => {
       '已保存 API Key，留空将继续使用原记录。',
     ]);
   });
+
+  it('明确说明待审核状态会阻止进入 Dashboard', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockImplementationOnce(() => jsonResponse({
+        completed: true,
+        latestRun: { id: 'run_done', status: 'completed', overallProgress: 100, stages: [] },
+        review: { required: true, pendingCount: 2, blockedCount: 1, items: [] },
+      }))
+      .mockImplementationOnce(() => jsonResponse({
+        review: { required: true, pendingCount: 2, blockedCount: 1, items: [] },
+      })));
+
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('处理完成后才能进入 Dashboard');
+    expect(wrapper.find('a[href="/"]').exists()).toBe(false);
+  });
+
+  it('刷新后根据服务端完成状态恢复 Dashboard 入口', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => jsonResponse({
+      completed: true,
+      latestRun: { id: 'run_done', status: 'completed', overallProgress: 100, stages: [] },
+      review: { required: false, pendingCount: 0, blockedCount: 0, items: [] },
+    })));
+
+    const wrapper = mount(App);
+    await flushPromises();
+
+    expect(wrapper.get('a[href="/"]').text()).toBe('进入 Dashboard');
+  });
 });

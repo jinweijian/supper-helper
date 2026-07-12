@@ -17,6 +17,7 @@ const pickerOpen = ref(false);
 const pickerField = ref<'workspacePath' | 'knowledgeRoot' | 'sourceDir'>('workspacePath');
 const pickerOpener = ref<HTMLElement>();
 const validationText = computed(() => onboarding.validation.value ? JSON.stringify(onboarding.validation.value, null, 2) : '等待预检结果…');
+const onboardingCompleted = computed(() => onboarding.snapshot.value.completed === true || onboarding.run.value?.status === 'completed');
 
 onMounted(async () => {
   try {
@@ -101,8 +102,9 @@ function apiKeyHint(hasApiKey: boolean): string {
     </section>
     <section class="setup-card"><h2>检查并执行</h2><div class="stack-actions"><button class="primary" type="button" :disabled="onboarding.loading.value" @click="run">检查并执行</button><button type="button" :disabled="!onboarding.run.value || onboarding.loading.value" @click="onboarding.retry">从失败阶段重试</button></div><pre>{{ validationText }}</pre></section>
     <section class="setup-card"><h2>进度</h2><progress :value="onboarding.run.value?.overallProgress || 0" max="100" /><p>{{ onboarding.run.value?.status || '尚未开始' }}</p><div class="stage-list"><article v-for="stage in onboarding.run.value?.stages || []" :key="String(stage.id)"><strong>{{ stage.id }}</strong><span>{{ stage.status }} {{ stage.progress || 0 }}%</span></article></div></section>
+    <section v-if="onboarding.review.value?.required" class="setup-card review-gate-notice"><h2>完成知识审核后进入 Dashboard</h2><p>还有 {{ onboarding.review.value.pendingCount || 0 }} 条待审核、{{ onboarding.review.value.blockedCount || 0 }} 条阻断项，处理完成后才能进入 Dashboard。</p></section>
     <ReviewPanel :review="onboarding.review.value" :loading="onboarding.loading.value" @refresh="onboarding.loadReview" @submit="onboarding.submitReview" />
-    <section v-if="onboarding.run.value?.status === 'completed' && !onboarding.review.value?.required" class="setup-card success"><h2>开始使用</h2><p>配置与知识索引已准备完成。</p><a class="button-link" href="/">进入 Dashboard</a></section>
+    <section v-if="onboardingCompleted && !onboarding.review.value?.required" class="setup-card success"><h2>开始使用</h2><p>配置与知识索引已准备完成。</p><a class="button-link" href="/">进入 Dashboard</a></section>
     <PathDialog :open="pickerOpen" :initial-path="form[pickerField]" :return-focus="pickerOpener" @close="pickerOpen = false" @select="selectPath" />
   </main>
 </template>
