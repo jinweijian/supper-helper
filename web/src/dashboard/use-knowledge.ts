@@ -34,6 +34,8 @@ export function useKnowledge(options: { fetcher?: Fetcher } = {}) {
     error,
     loading,
     check: (workspaceId: string, query = '') => request('/api/knowledge/health', workspaceId, query, 'GET'),
+    loadLocalHealth: (workspaceId: string) => request('/api/knowledge/health', workspaceId, '', 'GET'),
+    probe: (workspaceId: string, query: string) => request('/api/knowledge/health', workspaceId, query, 'GET'),
     bind: (workspaceId: string, query = '') => request('/api/knowledge/bind', workspaceId, query, 'POST'),
     reindex: (workspaceId: string, query = '') => request('/api/knowledge/reindex', workspaceId, query, 'POST'),
   };

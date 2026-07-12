@@ -25,6 +25,7 @@ const settingsOpener = ref<HTMLElement>();
 onMounted(async () => {
   await sessions.initialize();
   const current = sessions.current.value;
+  if (current) knowledge.loadLocalHealth(current.workspaceId || 'current').catch(() => undefined);
   const pending = current ? pendingUserMessageId(current) : undefined;
   if (current && pending) {
     chat.poll(current.id, pending, (session) => { if (sessions.current.value?.id === session.id) sessions.current.value = session; }).then((settled) => {
@@ -71,7 +72,15 @@ async function openSettings(event: MouseEvent): Promise<void> {
 function withCurrentKnowledge(action: 'check' | 'bind' | 'reindex'): void {
   const current = sessions.current.value;
   if (!current) return;
-  knowledge[action](current.workspaceId || 'current', current.title).catch(() => undefined);
+  const query = [...current.messages].reverse().find((item) => item.role === 'user')?.body || current.title;
+  if (action === 'check') knowledge.probe(current.workspaceId || 'current', query).catch(() => undefined);
+  else knowledge[action](current.workspaceId || 'current', query).catch(() => undefined);
+}
+
+async function openSession(id: string): Promise<void> {
+  await sessions.open(id);
+  const current = sessions.current.value;
+  if (current) await knowledge.loadLocalHealth(current.workspaceId || 'current').catch(() => undefined);
 }
 </script>
 
@@ -87,7 +96,7 @@ function withCurrentKnowledge(action: 'check' | 'bind' | 'reindex'): void {
       <SessionSidebar
         :sessions="sessions.sessions.value"
         :active-id="sessions.current.value?.id"
-        @open="sessions.open"
+        @open="openSession"
         @create="sessions.create"
         @action="sessions.action"
         @remove="sessions.remove"

@@ -78,6 +78,19 @@ describe('dashboard composables', () => {
     expect(knowledge.error.value).toBe('failed');
   });
 
+  it('loads offline local health separately and probes with the latest user question', async () => {
+    const fetcher = vi.fn()
+      .mockImplementationOnce(() => response({ knowledgeHealth: { status: 'local' } }))
+      .mockImplementationOnce(() => response({ knowledgeHealth: { status: 'probed' } }));
+    const knowledge = useKnowledge({ fetcher });
+    await knowledge.loadLocalHealth('current');
+    await knowledge.probe('current', '最新用户问题');
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      '/api/knowledge/health?workspaceId=current&query=',
+      '/api/knowledge/health?workspaceId=current&query=%E6%9C%80%E6%96%B0%E7%94%A8%E6%88%B7%E9%97%AE%E9%A2%98',
+    ]);
+  });
+
   it('loads, tests, and saves settings through their existing endpoints', async () => {
     const fetcher = vi.fn()
       .mockImplementationOnce(() => response({ model: { model: 'demo' } }))

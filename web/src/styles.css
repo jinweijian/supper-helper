@@ -61,6 +61,11 @@ pre { margin: 0; max-width: 100%; overflow: auto; white-space: pre-wrap; overflo
 .case-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .case-header h1 { margin: 0; font-size: 20px; }
 .case-header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.case-step-rail { display: flex; gap: 5px; margin-top: 8px; }
+.case-step-rail span { padding: 3px 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; }
+.case-step-rail .done, .case-step-rail .current { color: var(--accent); border-color: var(--accent); }
+.context-meter { display: grid; gap: 4px; margin-top: 8px; }
+.context-meter small { color: var(--muted); }
 .chat { min-width: 0; overflow-y: auto; padding: 22px clamp(16px, 5vw, 72px); }
 .empty-state { max-width: 560px; margin: 12vh auto 0; text-align: center; }
 .empty-state h2 { margin-bottom: 6px; }
@@ -93,6 +98,11 @@ pre { margin: 0; max-width: 100%; overflow: auto; white-space: pre-wrap; overflo
 .insight-panel section { margin-top: 16px; }
 .insight-panel h3 { margin: 0 0 8px; font-size: 14px; }
 .insight-panel pre { max-height: 42vh; padding: 10px; border-radius: 7px; background: var(--surface-muted); font-size: 11px; }
+.evidence-list, .health-grid { display: grid; gap: 8px; }
+.evidence-list article, .evidence-list details, .health-grid article { padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-muted); }
+.health-grid { grid-template-columns: 1fr 1fr; }
+.health-grid article { display: grid; gap: 4px; }
+.health-grid span { color: var(--muted); font-size: 11px; }
 .drawer-backdrop { position: fixed; inset: 0; z-index: 20; display: flex; justify-content: flex-end; background: rgb(12 20 26 / .45); }
 .drawer-panel { width: min(640px, 92vw); height: 100dvh; overflow-y: auto; padding: 18px; border-left: 1px solid var(--line); background: var(--surface); box-shadow: -16px 0 48px rgb(15 30 40 / .18); }
 .drawer-header { position: sticky; top: -18px; display: flex; align-items: center; justify-content: space-between; margin: -18px -18px 16px; padding: 16px 18px; border-bottom: 1px solid var(--line); background: var(--surface); }

@@ -11,10 +11,12 @@ const emit = defineEmits<{
 }>();
 const query = ref('');
 const filter = ref<'all' | 'active' | 'concluded' | 'need_input'>('all');
+const activeStatuses = ['queued', 'ready_for_diagnosis', 'diagnosing'];
+const statusLabels: Record<string, string> = { queued: '排队中', ready_for_diagnosis: '等待诊断', diagnosing: '诊断中', collecting_input: '新建', need_input: '待补充', partial: '证据不足', concluded: '已有结论' };
 const visible = computed(() => props.sessions.filter((session) => {
   const text = `${session.title} ${session.lastMessage ?? ''}`.toLowerCase();
   const stateMatches = filter.value === 'all'
-    || (filter.value === 'active' && ['collecting_input', 'diagnosing'].includes(session.status))
+    || (filter.value === 'active' && activeStatuses.includes(session.status))
     || session.status === filter.value;
   return stateMatches && text.includes(query.value.toLowerCase());
 }));
@@ -29,7 +31,7 @@ const visible = computed(() => props.sessions.filter((session) => {
     <label class="sr-only" for="session-search">搜索会话</label>
     <input id="session-search" v-model="query" placeholder="搜索 case 或结论" />
     <div class="filter-row" aria-label="会话筛选">
-      <button v-for="item in ['all', 'active', 'concluded', 'need_input'] as const" :key="item" type="button" :class="{ active: filter === item }" @click="filter = item">
+      <button v-for="item in ['all', 'active', 'concluded', 'need_input'] as const" :key="item" type="button" :data-filter="item" :class="{ active: filter === item }" @click="filter = item">
         {{ { all: '全部', active: '处理中', concluded: '已有结论', need_input: '待补充' }[item] }}
       </button>
     </div>
@@ -38,7 +40,7 @@ const visible = computed(() => props.sessions.filter((session) => {
       <article v-for="session in visible" :key="session.id" class="session-item" :class="{ active: session.id === activeId }">
         <button class="session-open" type="button" @click="emit('open', session.id)">
           <strong>{{ session.title }}</strong>
-          <span>{{ session.status }} · {{ session.lastMessage || '暂无消息' }}</span>
+          <span>{{ statusLabels[session.status] || session.status }} · {{ session.lastMessage || '暂无消息' }}</span>
         </button>
         <details class="session-actions">
           <summary aria-label="更多选项">•••</summary>

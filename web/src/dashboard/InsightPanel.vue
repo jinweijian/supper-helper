@@ -32,7 +32,10 @@ const safeRun = computed(() => safeRunView(props.session));
     <section v-else>
       <h3>知识库状态</h3>
       <p v-if="error" class="error-banner">{{ error }}</p>
-      <pre>{{ JSON.stringify(health || session?.knowledgeHealth || {}, null, 2) }}</pre>
+      <div v-if="health || session?.knowledgeHealth" class="health-grid">
+        <article v-for="(value, key) in (health || session?.knowledgeHealth)" :key="key"><span>{{ key }}</span><strong>{{ typeof value === 'object' ? (value as any)?.status || '已加载' : value }}</strong></article>
+      </div>
+      <p v-else class="muted">正在等待当前服务的本地知识健康状态。</p>
       <div class="stack-actions">
         <button type="button" :disabled="loading" @click="emit('check')">测试检索</button>
         <button type="button" :disabled="loading" @click="emit('bind')">绑定知识库</button>
