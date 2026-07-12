@@ -5,10 +5,10 @@ import RichAnswer from './RichAnswer.vue';
 import ChatProgressCard from './ChatProgressCard.vue';
 import type { ChatProgressState } from './chat-progress';
 
-const props = defineProps<{ session?: SessionDto; sending: boolean; progress?: ChatProgressState }>();
-const emit = defineEmits<{ send: [message: string, persona: string] }>();
+const props = defineProps<{ session?: SessionDto; sending: boolean; progress?: ChatProgressState; selectedPersona?: string }>();
+const emit = defineEmits<{ send: [message: string, persona: string]; updatePersona: [persona: string] }>();
 const message = ref('');
-const persona = ref('operations');
+const persona = computed({ get: () => props.selectedPersona || props.session?.userPersona || 'operations', set: (value: string) => emit('updatePersona', value) });
 const chat = ref<HTMLElement>();
 const blockedReason = computed(() => props.session?.archivedAt ? '这个会话已归档，只能阅读，不能继续追问。' : props.session?.contextUsage?.available === false ? '上下文窗口已满，请新建诊断后继续。' : '');
 const statusLabels: Record<string, string> = { queued: '排队中', ready_for_diagnosis: '等待诊断', diagnosing: '诊断中', collecting_input: '新建', need_input: '待补充', partial: '证据不足', concluded: '已有结论' };

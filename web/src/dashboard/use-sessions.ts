@@ -51,8 +51,8 @@ export function useSessions(options: SessionOptions = {}) {
     browserHistory[replace ? 'replaceState' : 'pushState']({}, '', `/sessions/${encodeURIComponent(id)}`);
   }
 
-  async function create(): Promise<SessionDto> {
-    const body = await apiJson<{ session: SessionDto }>(fetcher, '/api/sessions', jsonRequest('POST', { title: '新对话' }));
+  async function create(persona = 'operations'): Promise<SessionDto> {
+    const body = await apiJson<{ session: SessionDto }>(fetcher, '/api/sessions', jsonRequest('POST', { title: '新对话', persona }));
     await list();
     current.value = body.session;
     browserHistory.pushState({}, '', `/sessions/${encodeURIComponent(body.session.id)}`);

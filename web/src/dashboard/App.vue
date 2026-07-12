@@ -21,10 +21,12 @@ const logsOpen = ref(false);
 const settingsOpen = ref(false);
 const logsOpener = ref<HTMLElement>();
 const settingsOpener = ref<HTMLElement>();
+const selectedPersona = ref('operations');
 
 onMounted(async () => {
   await sessions.initialize();
   const current = sessions.current.value;
+  if (current?.userPersona) selectedPersona.value = current.userPersona;
   if (current) knowledge.loadLocalHealth(current.workspaceId || 'current').catch(() => undefined);
   const pending = current ? pendingUserMessageId(current) : undefined;
   if (current && pending) {
@@ -97,11 +99,11 @@ async function openSession(id: string): Promise<void> {
         :sessions="sessions.sessions.value"
         :active-id="sessions.current.value?.id"
         @open="openSession"
-        @create="sessions.create"
+        @create="sessions.create(selectedPersona)"
         @action="sessions.action"
         @remove="sessions.remove"
       />
-      <ChatPanel :session="sessions.current.value" :sending="chat.sending.value" :progress="chat.progress.value" @send="send">
+      <ChatPanel :session="sessions.current.value" :sending="chat.sending.value" :progress="chat.progress.value" :selected-persona="selectedPersona" @update-persona="selectedPersona = $event" @send="send">
         <template #actions><button type="button" :disabled="!sessions.current.value" @click="openLogs">日志</button></template>
       </ChatPanel>
       <InsightPanel

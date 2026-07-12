@@ -26,6 +26,15 @@ describe('dashboard composables', () => {
     expect(history.pushState).toHaveBeenLastCalledWith({}, '', '/sessions/case_a');
   });
 
+  it('creates a session with the currently selected persona', async () => {
+    const fetcher = vi.fn()
+      .mockImplementationOnce(() => response({ session: { id: 'case_new', title: '新对话', status: 'collecting_input', messages: [], runs: [] } }))
+      .mockImplementationOnce(() => response({ sessions: [] }));
+    const state = useSessions({ fetcher, history: { pushState: vi.fn(), replaceState: vi.fn() }, initialPath: '/' });
+    await state.create('developer');
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({ persona: 'developer' });
+  });
+
   it('polls until the matching assistant response appears', async () => {
     const fetcher = vi.fn()
       .mockImplementationOnce(() => response({ accepted: true, caseId: 'case_a', userMessageId: 'msg_user' }, 202))
