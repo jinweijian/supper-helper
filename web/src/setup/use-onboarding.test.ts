@@ -7,6 +7,37 @@ const response = (body: unknown, status = 200) => Promise.resolve(new Response(J
 }));
 
 describe('setup onboarding state', () => {
+  it('restores the latest run and review state from the public snapshot', async () => {
+    const onboarding = useOnboarding({
+      fetcher: vi.fn(() => response({
+        completed: true,
+        latestRun: { id: 'run_saved', status: 'completed', overallProgress: 100, stages: [] },
+        review: { required: false, pendingCount: 0, blockedCount: 0, items: [] },
+      })),
+    });
+
+    await onboarding.load();
+
+    expect(onboarding.run.value?.id).toBe('run_saved');
+    expect(onboarding.review.value?.required).toBe(false);
+  });
+
+  it('adopts the review returned by a batch submission before refreshing it', async () => {
+    const fetcher = vi.fn()
+      .mockImplementationOnce(() => response({
+        review: { required: false, pendingCount: 0, blockedCount: 0, items: [] },
+      }))
+      .mockImplementationOnce(() => response({
+        review: { required: false, pendingCount: 0, blockedCount: 0, items: [] },
+      }));
+    const onboarding = useOnboarding({ fetcher });
+
+    await onboarding.submitReview({ action: 'approve', ids: ['slice-1'] });
+
+    expect(onboarding.review.value?.required).toBe(false);
+    expect(fetcher).toHaveBeenNthCalledWith(1, '/api/onboarding/review', expect.objectContaining({ method: 'POST' }));
+  });
+
   it('saves draft, validates, starts a run, receives progress, and retries', async () => {
     const fetcher = vi.fn()
       .mockImplementationOnce(() => response({ draft: { revision: 1 } }))

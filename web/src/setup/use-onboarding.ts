@@ -10,6 +10,11 @@ export interface RunDto {
   safeError?: { message?: string };
 }
 
+interface OnboardingSnapshot extends Record<string, unknown> {
+  latestRun?: RunDto;
+  review?: Record<string, unknown>;
+}
+
 interface EventSourceLike {
   close(): void;
   addEventListener?(type: string, listener: (event: MessageEvent) => void): void;
@@ -45,8 +50,11 @@ export function useOnboarding(options: {
   }
 
   async function load() {
-    snapshot.value = await execute(() => apiJson(fetcher, '/api/onboarding'));
-    return snapshot.value;
+    const state = await execute(() => apiJson<OnboardingSnapshot>(fetcher, '/api/onboarding'));
+    snapshot.value = state;
+    run.value = state.latestRun;
+    review.value = state.review;
+    return state;
   }
 
   async function save(input: Record<string, unknown>) {
@@ -100,6 +108,7 @@ export function useOnboarding(options: {
 
   async function submitReview(input: Record<string, unknown>) {
     const body = await execute(() => apiJson<Record<string, unknown>>(fetcher, '/api/onboarding/review', jsonRequest('POST', input)));
+    if (body.review && typeof body.review === 'object') review.value = body.review as Record<string, unknown>;
     await loadReview();
     return body;
   }
