@@ -28,7 +28,14 @@ export function useSettings(options: { fetcher?: Fetcher } = {}) {
   }
 
   async function post(name: SettingsAction, path: string, body: Record<string, unknown>, success: string) {
-    const result = await execute(name, () => apiJson<Record<string, unknown>>(fetcher, path, jsonRequest('POST', body)), success);
+    const result = await execute(name, async () => {
+      const response = await apiJson<Record<string, any>>(fetcher, path, jsonRequest('POST', body));
+      if (path.endsWith('/test') && response.ok === false) {
+        const message = typeof response.error === 'string' ? response.error : response.error?.safeMessage || '连接测试失败';
+        throw new Error(message);
+      }
+      return response;
+    }, success);
     if (!path.endsWith('/test')) value.value = { ...value.value, ...result, agents: value.value.agents };
     return result;
   }

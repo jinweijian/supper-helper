@@ -118,4 +118,11 @@ describe('dashboard composables', () => {
     ]);
     expect(settings.actions.testModel.running).toBe(false);
   });
+
+  it('treats an HTTP 200 smoke result with ok false as a visible failure', async () => {
+    const settings = useSettings({ fetcher: vi.fn(() => response({ ok: false, error: '模型凭证无效' })) });
+    await expect(settings.testModel({ model: 'bad' })).rejects.toThrow('模型凭证无效');
+    expect(settings.actions.testModel.error).toBe('模型凭证无效');
+    expect(settings.actions.testModel.running).toBe(false);
+  });
 });
