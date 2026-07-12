@@ -28,7 +28,12 @@ const onboarding = {
   async saveDraft(input) { draft = input.draft; return this.getState(); },
   async validateDraft() { return { ok: true, issues: [] }; },
   getReviewState() { return reviewState(); },
-  async submitReview() { reviewRequired = false; return { review: reviewState(), publishedSlices: 1, indexedDocuments: 1, indexedChunks: 1 }; },
+  async submitReview(input) {
+    const ids = [...(input.ids ?? [])].sort();
+    if (ids.join(',') !== 'review_1,review_2') throw new Error('review requires explicit current-page ids');
+    reviewRequired = false;
+    return { review: reviewState(), publishedSlices: 2, indexedDocuments: 2, indexedChunks: 2 };
+  },
   async startRun() {
     run = makeRun('failed');
     queueMicrotask(() => publish('run.failed'));
@@ -45,13 +50,41 @@ const onboarding = {
 };
 
 function reviewState() {
+  const items = [
+    reviewItem('review_1', '登录知识切片', '内容摘要：登录失败时先核对账号状态。'),
+    reviewItem('review_2', '退款知识切片', '退款申请需要提供订单编号和退款原因。'),
+  ];
   return {
     required: reviewRequired,
-    pendingCount: reviewRequired ? 1 : 0,
+    pendingCount: reviewRequired ? 2 : 0,
     blockedCount: 0,
-    totalCount: reviewRequired ? 1 : 0,
-    page: { offset: 0, limit: 20, total: reviewRequired ? 1 : 0, returned: reviewRequired ? 1 : 0, hasMore: false, severity: 'all', search: '' },
-    items: reviewRequired ? [{ id: 'review_1', sourceDocumentId: 'doc_1', title: '测试知识切片', module: 'demo', path: 'demo.md', qualitySeverity: 'warn', issues: [], excerptPreview: '示例' }] : [],
+    totalCount: reviewRequired ? 2 : 0,
+    page: { offset: 0, limit: 20, total: reviewRequired ? 2 : 0, returned: reviewRequired ? 2 : 0, hasMore: false, severity: 'all', search: '' },
+    items: reviewRequired ? items : [],
+  };
+}
+function reviewItem(id, title, excerptPreview) {
+  return {
+    id,
+    sourceDocumentId: `doc_${id}`,
+    title,
+    module: 'demo',
+    path: `knowledge/${id}.md`,
+    qualitySeverity: 'warn',
+    qualityStatus: 'warn',
+    pipelineStatus: 'review_required',
+    excerptPreview,
+    issues: [{
+      code: 'short_content',
+      severity: 'warn',
+      message: '内容较短',
+      explanation: {
+        reason: '原因：内容较短，需要人工确认是否足以回答问题。',
+        impact: '影响：未经确认的内容可能无法覆盖用户问题。',
+        suggestion: '建议：确认结论、适用范围与操作步骤。',
+        missingInfo: ['适用版本'],
+      },
+    }],
   };
 }
 function makeRun(status) {
