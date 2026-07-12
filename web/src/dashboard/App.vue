@@ -5,6 +5,7 @@ import ChatPanel from './ChatPanel.vue';
 import InsightPanel from './InsightPanel.vue';
 import SessionSidebar from './SessionSidebar.vue';
 import SettingsForm from './SettingsForm.vue';
+import LogList from './LogList.vue';
 import { pendingUserMessageId, useChat } from './use-chat';
 import { useKnowledge } from './use-knowledge';
 import { useLogs } from './use-logs';
@@ -107,12 +108,7 @@ function withCurrentKnowledge(action: 'check' | 'bind' | 'reindex'): void {
     <AccessibleDrawer :open="logsOpen" title="诊断日志" :return-focus="logsOpener" @close="logsOpen = false">
       <p v-if="logs.error.value" class="error-banner">{{ logs.error.value }}</p>
       <button type="button" :disabled="logs.loading.value" @click="logs.refresh">刷新</button>
-      <div class="log-list">
-        <article v-for="(block, index) in logs.blocks.value" :key="index">
-          <h3>{{ block.title || `日志 ${index + 1}` }}</h3>
-          <pre>{{ block.command || block.body || JSON.stringify(block, null, 2) }}</pre>
-        </article>
-      </div>
+      <LogList :blocks="logs.blocks.value" :loading="logs.loading.value" />
     </AccessibleDrawer>
     <AccessibleDrawer :open="settingsOpen" title="配置" :return-focus="settingsOpener" @close="settingsOpen = false">
       <p v-if="settings.loading.value" role="status">正在加载配置…</p>

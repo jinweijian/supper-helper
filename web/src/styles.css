@@ -97,9 +97,19 @@ pre { margin: 0; max-width: 100%; overflow: auto; white-space: pre-wrap; overflo
 .drawer-panel { width: min(640px, 92vw); height: 100dvh; overflow-y: auto; padding: 18px; border-left: 1px solid var(--line); background: var(--surface); box-shadow: -16px 0 48px rgb(15 30 40 / .18); }
 .drawer-header { position: sticky; top: -18px; display: flex; align-items: center; justify-content: space-between; margin: -18px -18px 16px; padding: 16px 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .drawer-header h2 { margin: 0; font-size: 18px; }
-.log-list { display: grid; gap: 10px; margin-top: 12px; }
-.log-list article { padding: 12px; border-radius: var(--radius); background: var(--surface-muted); }
-.log-list h3 { margin: 0 0 8px; font-size: 14px; }
+.log-controls { display: flex; align-items: center; gap: 7px; margin-bottom: 12px; }
+.log-controls span { margin-right: auto; color: var(--muted); }
+.log-list { display: grid; gap: 9px; }
+.log-card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-muted); overflow: hidden; }
+.log-card.warn { border-left: 4px solid #b98218; }
+.log-card.error { border-left: 4px solid var(--danger); }
+.log-card.ok { border-left: 4px solid var(--accent); }
+.log-card summary { display: flex; align-items: flex-start; gap: 10px; padding: 12px; cursor: pointer; }
+.log-title { display: grid; gap: 4px; min-width: 0; margin-right: auto; }
+.log-title small { color: var(--muted); overflow-wrap: anywhere; }
+.log-severity, .log-tags span { padding: 3px 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 11px; }
+.log-tags { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 12px 10px; }
+.log-detail, .log-command { margin: 0 12px 12px; padding: 10px; border-radius: 7px; background: var(--surface); font-size: 12px; }
 .settings-form { display: grid; gap: 13px; }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (prefers-color-scheme: dark) {

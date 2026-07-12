@@ -2,10 +2,18 @@ import { ref } from 'vue';
 import { apiJson, type Fetcher } from '../shared/api';
 
 export interface LogBlock {
+  id?: string;
+  createdAt?: string;
+  actor?: string;
+  phase?: string;
+  agentName?: string;
+  label?: string;
   title?: string;
   body?: string;
   severity?: string;
   command?: string;
+  detail?: unknown;
+  tags?: string[];
 }
 
 export function useLogs(options: { fetcher?: Fetcher } = {}) {
