@@ -94,6 +94,7 @@ describe('dashboard composables', () => {
   it('loads, tests, and saves settings through their existing endpoints', async () => {
     const fetcher = vi.fn()
       .mockImplementationOnce(() => response({ model: { model: 'demo' } }))
+      .mockImplementationOnce(() => response({ agents: [{ id: 'main' }] }))
       .mockImplementationOnce(() => response({ ok: true }))
       .mockImplementationOnce(() => response({ model: { model: 'next' } }));
     const settings = useSettings({ fetcher });
@@ -102,8 +103,10 @@ describe('dashboard composables', () => {
     await settings.saveModel({ model: 'next' });
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
       '/api/settings',
+      '/api/agents',
       '/api/settings/model/test',
       '/api/settings/model',
     ]);
+    expect(settings.actions.testModel.running).toBe(false);
   });
 });

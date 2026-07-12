@@ -120,14 +120,14 @@ async function openSession(id: string): Promise<void> {
       <LogList :blocks="logs.blocks.value" :loading="logs.loading.value" />
     </AccessibleDrawer>
     <AccessibleDrawer :open="settingsOpen" title="配置" :return-focus="settingsOpener" @close="settingsOpen = false">
-      <p v-if="settings.loading.value" role="status">正在加载配置…</p>
+      <p v-if="settings.actions.load.running" role="status">正在加载配置…</p>
       <SettingsForm
-        v-else
         :settings="settings.value.value"
-        :status="settings.status.value"
-        :error="settings.error.value"
-        :loading="settings.loading.value"
+        :actions="settings.actions"
         @save-model="settings.saveModel"
+        @save-embedding="settings.saveEmbedding"
+        @save-rerank="settings.saveRerank"
+        @save-claude="settings.saveClaude"
         @test-model="settings.testModel"
         @test-embedding="settings.testEmbedding"
         @test-rerank="settings.testRerank"
