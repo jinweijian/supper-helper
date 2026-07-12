@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { SessionDto } from '../shared/contracts';
+import { safeRunView } from './dashboard-view-model';
 
 const props = defineProps<{ session?: SessionDto; health?: Record<string, unknown>; loading: boolean; error: string }>();
 const emit = defineEmits<{ check: []; bind: []; reindex: [] }>();
 const tab = ref<'progress' | 'evidence' | 'health'>('progress');
 const latestRun = computed(() => props.session?.runs.at(-1));
+const safeRun = computed(() => safeRunView(props.session));
 </script>
 
 <template>
@@ -19,11 +21,13 @@ const latestRun = computed(() => props.session?.runs.at(-1));
     <section v-if="tab === 'progress'">
       <h3>当前状态</h3>
       <p>{{ session?.status || '尚未开始' }}</p>
-      <pre v-if="latestRun">{{ JSON.stringify(latestRun, null, 2) }}</pre>
+      <p v-if="props.session?.agentActivity?.length">{{ props.session.agentActivity[0]?.summary }}</p>
     </section>
     <section v-else-if="tab === 'evidence'">
       <h3>最近运行证据</h3>
-      <pre>{{ JSON.stringify(latestRun || {}, null, 2) }}</pre>
+      <div v-if="safeRun.claims.length" class="evidence-list"><article v-for="claim in safeRun.claims" :key="claim.id"><strong>{{ claim.type }}</strong><p>{{ claim.text }}</p></article></div>
+      <div v-if="safeRun.evidence.length" class="evidence-list"><details v-for="item in safeRun.evidence" :key="item.id"><summary>{{ item.summary }}</summary><p>{{ item.source }} · {{ item.confidence }}</p></details></div>
+      <p v-for="item in safeRun.missingInfo" :key="item" class="muted">仍需确认：{{ item }}</p>
     </section>
     <section v-else>
       <h3>知识库状态</h3>

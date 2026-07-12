@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue';
 import type { SessionDto } from '../shared/contracts';
+import RichAnswer from './RichAnswer.vue';
 
 const props = defineProps<{ session?: SessionDto; sending: boolean }>();
 const emit = defineEmits<{ send: [message: string, persona: string] }>();
@@ -44,7 +45,8 @@ function onKeydown(event: KeyboardEvent): void {
       </div>
       <article v-for="item in session?.messages || []" :key="item.id" class="message" :class="item.role">
         <span>{{ item.role === 'user' ? '你' : 'helper' }}</span>
-        <pre>{{ item.body }}</pre>
+        <pre v-if="item.role === 'user'">{{ item.body }}</pre>
+        <RichAnswer v-else :text="item.body" />
       </article>
       <div v-if="sending" class="thinking" role="status">正在审核证据并组织答复…</div>
     </section>
