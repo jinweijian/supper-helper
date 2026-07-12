@@ -60,6 +60,7 @@ flowchart LR
 | Knowledge Root | 默认在配置的 knowledge root 下按 workspace 隔离，不写入项目源码目录 |
 | Provider | Embedding 与 rerank 在 `src/providers/` 下是同级能力 |
 | Retrieval | 新召回策略进入 `src/retrieval/recall/<strategy>/`，通过 registry 接入 |
+| Deep Query Planner | 代码升级线索由 `src/runtime/deep-query-planner.ts` 按知识 module 候选、projectType 和过滤后的 anchor terms 生成；路径提示不得硬编码为单一 `src/**` 假设 |
 | Observability | Runtime 记录事件，`src/observability/` 只做展示转换 |
 
 ## 继续阅读

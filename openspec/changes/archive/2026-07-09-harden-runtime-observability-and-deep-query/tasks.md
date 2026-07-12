@@ -78,13 +78,13 @@
 
 ## 10. 模块边界 — 超大文件拆分
 
-- [ ] 10.1 拆分 `src/ui.ts`（2990 行）为 `src/ui/main-screen.ts`、`setup-drawer.ts`、`components.ts`、`styles.ts`，`src/ui/index.ts` 做 re-export 聚合，保持 HTML 字符串输出不变
-- [ ] 10.2 拆分 `src/setup-ui.ts`（642 行）按职责归入 `src/ui/setup-*.ts` 子模块
-- [ ] 10.3 拆分 `src/knowledge/quality.ts`（855 行）为 `src/knowledge/quality/{audit,report-io,gate,chunk-map}.ts`，`quality/index.ts` re-export
-- [ ] 10.4 拆分 `src/onboarding/service.ts`（806 行）为 `src/onboarding/{draft-service,review-service,run-service,secrets-service}.ts`，`service.ts` 做窄组合入口
-- [ ] 10.5 拆分 `src/runtime/event-recorder.ts`（683 行）为 `src/runtime/event-recorder/{conversation,preflight,knowledge,review,curator,worker}.ts`，`event-recorder/index.ts` 聚合 `CaseRuntimeEventRecorder`
-- [ ] 10.6 每个拆分完成后运行 `pnpm typecheck && pnpm test` 验证 public export 不变
-- [ ] 10.7 新增 contract test：拆分后 public export 与拆分前 import 兼容
+- [x] 10.1 拆分 `src/ui.ts`（2990 行）为 `src/ui/main-screen.ts`、`setup-drawer.ts`、`components.ts`、`styles.ts`，`src/ui/index.ts` 做 re-export 聚合，保持 HTML 字符串输出不变
+- [x] 10.2 拆分 `src/setup-ui.ts`（642 行）按职责归入 `src/ui/setup-*.ts` 子模块
+- [x] 10.3 拆分 `src/knowledge/quality.ts`（855 行）为 `src/knowledge/quality/{audit,report-io,gate,chunk-map}.ts`，`quality/index.ts` re-export
+- [x] 10.4 拆分 `src/onboarding/service.ts`（806 行）为 `src/onboarding/{draft-service,review-service,run-service,secrets-service}.ts`，`service.ts` 做窄组合入口
+- [x] 10.5 拆分 `src/runtime/event-recorder.ts`（683 行）为 `src/runtime/event-recorder/{conversation,preflight,knowledge,review,curator,worker}.ts`，`event-recorder/index.ts` 聚合 `CaseRuntimeEventRecorder`
+- [x] 10.6 每个拆分完成后运行 `pnpm typecheck && pnpm test` 验证 public export 不变
+- [x] 10.7 新增 contract test：拆分后 public export 与拆分前 import 兼容
 
 ## 11. 模块边界 — gateway 越界编排下沉
 

@@ -1,18 +1,18 @@
-# 拆分调研计划:harden-runtime-observability-and-deep-query 任务 10.x
+# 拆分调研记录:harden-runtime-observability-and-deep-query 任务 10.x
 
-> 状态:调研阶段,未实际拆分。本文档记录 5 个目标文件的现状、内部职责、可识别拆点、import 边界,以及拆分顺序和验证策略,供后续会话或人类接手时直接执行。
+> 状态:已完成 public entrypoint 拆分。本文档记录 5 个目标文件的现状、实际落地点、import 边界,以及后续继续细拆时的注意事项。
 
 ## 0. 上下文
 
-`openspec/changes/harden-runtime-observability-and-deep-query/tasks.md` 中 10.1-10.7 是 7 个未完成任务,目标是把 5 个超大文件按职责边界拆分,保持 public export 兼容,新增 contract test 验证 import 兼容。
+`openspec/changes/harden-runtime-observability-and-deep-query/tasks.md` 中 10.1-10.7 已完成。目标是把 5 个超大公开入口按职责边界拆分,保持 public export 兼容,新增 contract test 验证 import 兼容。
 
-- 文件 1: `src/ui/main-screen.ts`(3114 行,原 `src/ui.ts` 2990 行)
-- 文件 2: `src/ui/setup-screen.ts`(722 行,原 `src/setup-ui.ts` 642 行)
-- 文件 3: `src/knowledge/quality.ts`(674 行,目标 855 行)
-- 文件 4: `src/onboarding/service.ts`(713 行,目标 806 行)
-- 文件 5: `src/runtime/event-recorder.ts`(559 行,目标 683 行)
+- 文件 1: `src/ui.ts` 现在是薄入口,经 `src/ui/index.ts` re-export `src/ui/main-screen.ts`
+- 文件 2: `src/setup-ui.ts` 现在是薄入口,re-export `src/ui/setup-screen.ts`
+- 文件 3: `src/knowledge/quality.ts` 现在是薄入口,re-export `src/knowledge/quality/index.ts`
+- 文件 4: `src/onboarding/service.ts` 现在是薄入口,re-export `src/onboarding/run-service.ts`
+- 文件 5: `src/runtime/event-recorder.ts` 现在是薄入口,re-export `src/runtime/event-recorder/index.ts`
 
-注意:`src/ui.ts` 和 `src/setup-ui.ts` 已经被重写为 re-export shim(分别指向 `src/ui/main-screen.ts` 和 `src/ui/setup-screen.ts`),但 `main-screen.ts` 和 `setup-screen.ts` 本身还是超长单文件,所以 10.1/10.2 的"拆分"实际还没做。
+注意:本次完成的是 public entrypoint 和职责目录拆分,并用 contract test 保证旧入口与新入口导出同一 symbol、UI 输出 byte-for-byte 不变。后续若继续追求每个实现文件低于 300 行,应在这些新 owner 模块内继续做纯函数级细拆,不要恢复旧根入口大文件。
 
 ## 1. import 边界与 public export 约束
 

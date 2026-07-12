@@ -52,11 +52,27 @@ Verification run during this slice:
 - `node --test test/runtime-hardening.test.mjs test/supper-helper.test.mjs`
 - `node --test test/runtime-hardening.test.mjs test/module-boundaries.test.mjs test/supper-helper.test.mjs`
 
+## 2026-07-09 Structural Split Follow-Up
+
+Completed the public entrypoint split for the deferred oversized files:
+
+- `src/ui.ts` now re-exports through `src/ui/index.ts`, with `src/ui/main-screen.ts` as the render owner and UI boundary files under `src/ui/`.
+- `src/setup-ui.ts` now re-exports `src/ui/setup-screen.ts`, with setup UI boundary files under `src/ui/`.
+- `src/knowledge/quality.ts` now re-exports through `src/knowledge/quality/index.ts`, with audit/report/gate/chunk-map boundary files.
+- `src/onboarding/service.ts` now stays a thin compatibility entrypoint and re-exports the service implementation through onboarding service boundary files.
+- `src/runtime/event-recorder.ts` now re-exports through `src/runtime/event-recorder/index.ts`, with phase-group boundary files under `src/runtime/event-recorder/`.
+
+Also added `src/redaction.ts` as the neutral secret-redaction owner. `src/providers/redaction.ts` remains a provider-facing compatibility export, while observability and runtime logging consume the neutral helper directly.
+
+Contract tests added in `test/module-boundaries.test.mjs` cover:
+
+- split source file presence
+- original facade thinness
+- old and new public exports resolving to the same symbols
+- byte-for-byte `renderApp()` and `renderSetupApp()` output compatibility
+- observability avoiding provider-owned redaction imports
+
 ## Deferred Scope / Follow-Up Debt
-
-The following tasks remain intentionally incomplete in this slice because they are large structural splits that should be reviewed as their own mechanical refactor batch:
-
-- Large file splits for `src/ui.ts`, `src/setup-ui.ts`, `src/knowledge/quality.ts`, `src/onboarding/service.ts`, and `src/runtime/event-recorder.ts`.
 
 Additional oversized files to feed into later OpenSpec changes:
 
@@ -79,4 +95,3 @@ Additional oversized files to feed into later OpenSpec changes:
 Follow-up tasks:
 
 - Remove deprecation re-export compatibility shims one minor version after root migrations land and consumers have moved to owner paths.
-- Move the redaction dependency used by `src/observability/worker-trace.ts` into a neutral utility so observability does not depend on provider ownership for generic secret redaction.
