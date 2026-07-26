@@ -372,6 +372,7 @@ const activeUntilFormalReplyScenarios = [
   {
     name: 'Experience path',
     message: '课程任务保存失败是什么原因？',
+    expectedTerminalStatus: 'concluded',
     setup({ store }) {
       seedReusableExperience(store, this.message);
       return {};
@@ -384,6 +385,7 @@ const activeUntilFormalReplyScenarios = [
   {
     name: 'Knowledge path',
     message: 'AI伴学助手如何制定学习计划？',
+    expectedTerminalStatus: 'concluded',
     setup({ config }) {
       seedAnswerableKnowledge(config);
       return {};
@@ -396,6 +398,7 @@ const activeUntilFormalReplyScenarios = [
   {
     name: 'MCP path',
     message: '请确认配置证据路径。',
+    expectedTerminalStatus: 'concluded',
     setup({ config }) {
       config.workspaces[0].mcpToolIds = ['local-docs'];
       config.mcpTools = [{
@@ -443,6 +446,7 @@ const activeUntilFormalReplyScenarios = [
   {
     name: 'Worker path',
     message: '请检查项目的运行时拆分是否可诊断。',
+    expectedTerminalStatus: 'concluded',
     setup() {
       return {};
     },
@@ -489,7 +493,7 @@ for (const scenario of activeUntilFormalReplyScenarios) {
       const formalReplies = settled.caseSession.messages.filter((message) => (
         message.role === 'helper' && message.replyToMessageId === turn.userMessageId
       ));
-      assert.equal(settled.caseSession.status, 'concluded');
+      assert.equal(settled.caseSession.status, scenario.expectedTerminalStatus);
       assert.equal(formalReplies.length, 1);
       scenario.verify({ settled, workerCalls });
     } finally {
@@ -500,6 +504,98 @@ for (const scenario of activeUntilFormalReplyScenarios) {
     }
   });
 }
+
+test('keeps Worker follow-up active until formal reply', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turn-integrity-follow-up-'));
+  let releaseFollowUpWorker;
+  let markFollowUpWorkerStarted;
+  const followUpWorkerStarted = new Promise((resolve) => {
+    markFollowUpWorkerStarted = resolve;
+  });
+  const followUpWorkerReleased = new Promise((resolve) => {
+    releaseFollowUpWorker = resolve;
+  });
+  const workerRequests = [];
+  let completion;
+
+  try {
+    const config = baseConfig(dir);
+    config.agent.useModelForPreflight = false;
+    config.agent.useModelForRagAnswerability = false;
+    config.agent.modelProvider = undefined;
+    const store = new FileMemoryStore(dir);
+    const worker = {
+      async diagnose(request) {
+        workerRequests.push(request);
+        if (workerRequests.length === 1) {
+          return {
+            result: {
+              status: 'partial',
+              summary: '首次只读排查需要继续定位路由。',
+              missingInfo: [],
+              evidence: [{
+                id: 'ev_initial',
+                kind: 'workspace',
+                source: 'src/router.ts',
+                summary: '首次排查只找到疑似路由入口。',
+                confidence: 'medium',
+              }],
+              claims: [{
+                id: 'claim_initial',
+                type: 'inference',
+                role: 'supporting_context',
+                text: '需要继续检查运行时路由配置。',
+                evidenceIds: ['ev_initial'],
+                answers: [],
+              }],
+              recommendedNextAction: 'continue_diagnosis',
+            },
+            trace: {
+              command: 'claude -p --session-id ...',
+              cwd: process.cwd(),
+              stdout: '{"result":"partial"}',
+              stderr: '',
+              exitCode: 0,
+              startedAt: new Date().toISOString(),
+              finishedAt: new Date().toISOString(),
+            },
+          };
+        }
+
+        markFollowUpWorkerStarted();
+        await followUpWorkerReleased;
+        return concludedWorkerResult('_follow_up');
+      },
+    };
+    const agent = new DiagnosticRuntime(config, store, worker);
+    const turn = agent.startUserTurn({
+      workspaceId: 'current',
+      message: '请检查项目的运行时路由配置并继续定位。',
+    });
+    completion = agent.completeUserTurn(turn.caseSession.id, turn.userMessageId);
+    await followUpWorkerStarted;
+
+    const snapshot = store.loadCase(turn.caseSession.id);
+    assert.ok(['ready_for_diagnosis', 'queued', 'diagnosing'].includes(snapshot.status));
+    assert.equal(snapshot.messages.some((message) => (
+      message.role === 'helper' && message.replyToMessageId === turn.userMessageId
+    )), false);
+    assert.equal(workerRequests.length, 2);
+
+    releaseFollowUpWorker();
+    const settled = await completion;
+    const formalReplies = settled.caseSession.messages.filter((message) => (
+      message.role === 'helper' && message.replyToMessageId === turn.userMessageId
+    ));
+    assert.equal(settled.caseSession.status, 'concluded');
+    assert.equal(formalReplies.length, 1);
+    assert.equal(workerRequests.length, 2);
+  } finally {
+    releaseFollowUpWorker();
+    await completion?.catch(() => undefined);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('startUserTurn returns AcceptedUserTurn exposing userMessageId', () => {
   const dir = mkdtempSync(join(tmpdir(), 'turn-integrity-'));
