@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import test from 'node:test';
 import { DiagnosticRuntime } from '../dist/runtime/diagnostic-runtime.js';
+import { initKnowledgeWorkspace, resolveKnowledgeWorkspaceRoot, updateKnowledgeIndex } from '../dist/knowledge/index.js';
 import { NoopModelClient } from '../dist/providers/model/adapter.js';
 import { CaseRuntimeEventRecorder } from '../dist/runtime/event-recorder.js';
 import { ReviewPresentationService } from '../dist/runtime/review-presentation.js';
@@ -217,6 +218,287 @@ function createModelAgent(dir, worker, modelPayload) {
     typeof modelPayload === 'string' ? modelPayload : JSON.stringify(modelPayload),
   );
   return { agent, store, config, restore: () => { globalThis.fetch = originalFetch; } };
+}
+
+function createReviewPause() {
+  let releaseReview;
+  let markReviewStarted;
+  const reviewStarted = new Promise((resolve) => {
+    markReviewStarted = resolve;
+  });
+  const reviewReleased = new Promise((resolve) => {
+    releaseReview = resolve;
+  });
+  return {
+    reviewStarted,
+    release() {
+      releaseReview();
+    },
+    async fetch() {
+      markReviewStarted();
+      await reviewReleased;
+      return modelChatResponse('{}');
+    },
+  };
+}
+
+function configurePausedReview(config) {
+  config.agent.useModelForPreflight = false;
+  config.agent.useModelForRagAnswerability = false;
+  config.agent.modelProvider = 'test';
+  config.models.providers.test = {
+    type: 'openai-compatible',
+    baseUrl: 'https://api.example.test/v1',
+    apiKey: 'test-key',
+    model: 'test-model',
+    temperature: 0,
+  };
+}
+
+function seedReusableExperience(store, message) {
+  const prior = store.createCase({
+    tenantId: 'local',
+    userId: 'local-user',
+    workspaceId: 'current',
+    title: '历史诊断',
+  });
+  const priorUser = store.addMessage(prior, { role: 'user', body: message });
+  store.addMessage(prior, {
+    role: 'helper',
+    body: '历史诊断确认配置缺失会导致保存失败。',
+    replyToMessageId: priorUser.id,
+  });
+  store.addRun(prior, {
+    id: 'run_prior',
+    caseId: prior.id,
+    status: 'concluded',
+    request: {
+      caseId: prior.id,
+      runId: 'run_prior',
+      workspaceId: prior.workspaceId,
+      claudeSessionId: prior.claudeSessionId,
+      answerGoal: {
+        rawUserQuestion: message,
+        resolvedQuestion: message,
+        answerObject: message,
+        mustAnswerItems: ['direct_answer'],
+        diagnosticObjective: message,
+        sourceMessageIds: [priorUser.id],
+      },
+      userGoal: message,
+      knownFacts: [],
+      unknowns: [],
+      constraints: [],
+      allowedMcpToolIds: [],
+    },
+    result: {
+      status: 'concluded',
+      summary: '历史诊断已有当前工作区证据。',
+      missingInfo: [],
+      evidence: [{
+        id: 'ev_prior',
+        kind: 'workspace',
+        source: 'src/task.ts',
+        summary: '配置缺失会导致保存失败。',
+        confidence: 'high',
+        validation: {
+          status: 'active',
+          visibility: 'internal',
+          lastVerifiedAt: new Date().toISOString(),
+          quality: 'ok',
+        },
+      }],
+      claims: [{
+        id: 'claim_prior',
+        type: 'fact',
+        role: 'primary_answer',
+        text: '配置缺失会导致保存失败。',
+        evidenceIds: ['ev_prior'],
+        answers: ['direct_answer'],
+      }],
+      recommendedNextAction: 'final_answer',
+    },
+  });
+  prior.status = 'concluded';
+  store.saveCase(prior);
+}
+
+function seedAnswerableKnowledge(config) {
+  const workspaceRoot = resolveKnowledgeWorkspaceRoot(config, 'current');
+  initKnowledgeWorkspace({ workspaceRoot });
+  const faqDir = join(workspaceRoot, 'knowledge', 'faq', 'ai-companion');
+  mkdirSync(faqDir, { recursive: true });
+  writeFileSync(
+    join(faqDir, 'learning-plan.md'),
+    `---
+id: kb_faq_ai_companion_learning_plan
+title: AI伴学助手如何制定学习计划
+type: faq
+module: ai-companion
+intent: how_to
+source_type: faq
+confidence: high
+status: active
+visibility: internal
+product_versions: []
+related_terms:
+  - AI伴学助手
+  - 制定学习计划
+  - 学习计划
+related_repos: []
+last_verified_at: 2026-07-26
+owner: support
+source_document: knowledge/_sources/manual/learning-plan.md
+source_document_id: src_learning_plan
+source_block_ids:
+  - blk_learning_plan
+section_path:
+  - AI伴学助手如何制定学习计划
+quality_status: ok
+---
+
+# AI伴学助手如何制定学习计划
+
+## 答案
+
+学员加入课程后，可以通过 AI 伴学助手制定学习计划。学习计划包含任务数、学习总时长、学习起止时间、每周学习日和每日学习时长。
+`,
+    'utf8',
+  );
+  updateKnowledgeIndex({ workspaceRoot });
+}
+
+const activeUntilFormalReplyScenarios = [
+  {
+    name: 'Experience path',
+    message: '课程任务保存失败是什么原因？',
+    setup({ store }) {
+      seedReusableExperience(store, this.message);
+      return {};
+    },
+    verify({ settled, workerCalls }) {
+      assert.equal(workerCalls.count, 0);
+      assert.equal(settled.caseSession.logs.some((event) => event.phase === 'experience_hit'), true);
+    },
+  },
+  {
+    name: 'Knowledge path',
+    message: 'AI伴学助手如何制定学习计划？',
+    setup({ config }) {
+      seedAnswerableKnowledge(config);
+      return {};
+    },
+    verify({ settled, workerCalls }) {
+      assert.equal(workerCalls.count, 0);
+      assert.equal(settled.caseSession.runs.at(-1).result.evidence[0].kind, 'knowledge');
+    },
+  },
+  {
+    name: 'MCP path',
+    message: '请确认配置证据路径。',
+    setup({ config }) {
+      config.workspaces[0].mcpToolIds = ['local-docs'];
+      config.mcpTools = [{
+        id: 'local-docs',
+        name: 'Local Docs',
+        protocol: 'stdio',
+        permission: 'read_only',
+        enabled: true,
+        allowedToolNames: ['answer'],
+        timeoutMs: 1_000,
+        config: { command: process.execPath, args: [], env: {} },
+      }];
+      return {
+        mcp: {
+          createClient: async () => ({
+            async listTools() {
+              return [{ name: 'answer' }];
+            },
+            async callTool() {
+              return {
+                content: [{ type: 'text', text: 'MCP 已确认配置证据路径。' }],
+                structuredContent: {
+                  superHelperEvidence: {
+                    confidence: 'high',
+                    claims: [{
+                      text: 'MCP 已确认配置证据路径。',
+                      type: 'fact',
+                      role: 'primary_answer',
+                      answers: ['direct_answer'],
+                    }],
+                  },
+                },
+              };
+            },
+            async close() {},
+          }),
+        },
+      };
+    },
+    verify({ settled, workerCalls }) {
+      assert.equal(workerCalls.count, 0);
+      assert.equal(settled.caseSession.runs.at(-1).result.evidence[0].kind, 'mcp');
+    },
+  },
+  {
+    name: 'Worker path',
+    message: '请检查项目的运行时拆分是否可诊断。',
+    setup() {
+      return {};
+    },
+    verify({ settled, workerCalls }) {
+      assert.equal(workerCalls.count, 1);
+      assert.equal(settled.caseSession.runs.at(-1).result.evidence[0].kind, 'workspace');
+    },
+  },
+];
+
+for (const scenario of activeUntilFormalReplyScenarios) {
+  test(`keeps ${scenario.name} active until formal reply`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'turn-integrity-active-'));
+    const originalFetch = globalThis.fetch;
+    const pause = createReviewPause();
+    const workerCalls = { count: 0 };
+    let completion;
+    try {
+      const config = baseConfig(dir);
+      configurePausedReview(config);
+      const store = new FileMemoryStore(dir);
+      const runtimeOptions = scenario.setup({ config, store });
+      const worker = {
+        async diagnose() {
+          workerCalls.count += 1;
+          return concludedWorkerResult();
+        },
+      };
+      const agent = new DiagnosticRuntime(config, store, worker, runtimeOptions);
+      globalThis.fetch = () => pause.fetch();
+
+      const turn = agent.startUserTurn({ workspaceId: 'current', message: scenario.message });
+      completion = agent.completeUserTurn(turn.caseSession.id, turn.userMessageId);
+      await pause.reviewStarted;
+
+      const snapshot = store.loadCase(turn.caseSession.id);
+      assert.ok(['ready_for_diagnosis', 'queued', 'diagnosing'].includes(snapshot.status));
+      assert.equal(snapshot.messages.some((message) => (
+        message.role === 'helper' && message.replyToMessageId === turn.userMessageId
+      )), false);
+
+      pause.release();
+      const settled = await completion;
+      const formalReplies = settled.caseSession.messages.filter((message) => (
+        message.role === 'helper' && message.replyToMessageId === turn.userMessageId
+      ));
+      assert.equal(settled.caseSession.status, 'concluded');
+      assert.equal(formalReplies.length, 1);
+      scenario.verify({ settled, workerCalls });
+    } finally {
+      pause.release();
+      await completion?.catch(() => undefined);
+      globalThis.fetch = originalFetch;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 }
 
 test('startUserTurn returns AcceptedUserTurn exposing userMessageId', () => {

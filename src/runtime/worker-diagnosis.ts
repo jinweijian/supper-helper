@@ -4,7 +4,7 @@ import type { DiagnosticWorker } from '../workers/diagnostic-worker.js';
 import type { ReviewPresentationResult } from './contracts.js';
 import { CaseRuntimeEventRecorder } from './event-recorder.js';
 import { buildFollowUpDiagnosticRequest } from './request-builder.js';
-import { caseStatusFromDiagnosticResult, shouldRunFollowUp } from './review-gate.js';
+import { shouldRunFollowUp } from './review-gate.js';
 import { ReviewPresentationService } from './review-presentation.js';
 import {
   applyWorkerResponseToRun,
@@ -30,7 +30,7 @@ export class WorkerDiagnosisService {
 
     const workerResponse = await this.worker.diagnose(request);
     const result = applyWorkerResponseToRun({ run, response: workerResponse });
-    caseSession.status = caseStatusFromDiagnosticResult(result);
+    caseSession.status = 'diagnosing';
     this.store.saveCase(caseSession);
     this.events.workerTrace(caseSession, workerResponse.trace);
 
@@ -95,7 +95,7 @@ export class WorkerDiagnosisService {
     this.events.diagnosticRequestCreated(caseSession, followUpRequest, { followUp: true });
     const followUpResponse = await this.worker.diagnose(followUpRequest);
     applyWorkerResponseToRun({ run: followUpRun, response: followUpResponse });
-    caseSession.status = caseStatusFromDiagnosticResult(followUpResponse.result);
+    caseSession.status = 'diagnosing';
     this.store.saveCase(caseSession);
     this.events.workerTrace(caseSession, followUpResponse.trace);
     review = await this.reviewer.reviewAndFormat(caseSession, followUpResponse.result, followUpRun);

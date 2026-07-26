@@ -11,8 +11,8 @@ import {
   prepareKnowledgeDiagnosis,
 } from './knowledge-diagnosis.js';
 import type { EvidenceJudgeBlocker } from './evidence-judge.js';
-import { caseStatusFromDiagnosticResult } from './review-gate.js';
 import { ReviewPresentationService } from './review-presentation.js';
+import { completePresentedTurn } from './turn-completion.js';
 
 export class KnowledgeTurnService {
   constructor(
@@ -119,19 +119,21 @@ export class KnowledgeTurnService {
     const run: DiagnosticRun = {
       id: request.runId,
       caseId: caseSession.id,
-      status: result.status,
+      status: 'running',
       request,
       result,
     };
+    caseSession.status = 'diagnosing';
     this.store.addRun(caseSession, run);
-    caseSession.status = caseStatusFromDiagnosticResult(result);
-    this.store.saveCase(caseSession);
     this.events.preflightKnowledgeAnswer(caseSession, result);
     this.events.knowledgeAnswerSelected(caseSession, result);
     const review = await this.reviewer.reviewAndFormat(caseSession, result, run);
-    this.events.presentationPrepared(caseSession, review.decision);
-    this.store.addMessage(caseSession, { role: 'helper', body: review.reply, replyToMessageId });
-    this.events.finalReplyCreated(caseSession, review.reply, review.decision);
-    return { caseSession, assistantMessage: review.reply, decision: review.decision };
+    return completePresentedTurn({
+      store: this.store,
+      events: this.events,
+      caseSession,
+      review,
+      replyToMessageId,
+    });
   }
 }

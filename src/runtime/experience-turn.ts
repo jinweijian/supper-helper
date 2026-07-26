@@ -4,8 +4,8 @@ import type { CaseRepository, StoredCase } from '../sessions/case-repository.js'
 import type { RuntimeTurnResponse } from './contracts.js';
 import { CaseRuntimeEventRecorder } from './event-recorder.js';
 import { findExperienceMatch, findRejectedExperienceCandidates } from './experience-agent.js';
-import { caseStatusFromDiagnosticResult } from './review-gate.js';
 import { ReviewPresentationService } from './review-presentation.js';
+import { completePresentedTurn } from './turn-completion.js';
 
 export class ExperienceTurnService {
   constructor(
@@ -58,17 +58,19 @@ export class ExperienceTurnService {
     const run: DiagnosticRun = {
       id: `run_${randomUUID().slice(0, 8)}`,
       caseId: caseSession.id,
-      status: match.result.status,
+      status: 'running',
       request,
       result: match.result,
     };
+    caseSession.status = 'diagnosing';
     this.store.addRun(caseSession, run);
-    caseSession.status = caseStatusFromDiagnosticResult(match.result);
-    this.store.saveCase(caseSession);
     const review = await this.reviewer.reviewAndFormat(caseSession, match.result, run);
-    this.events.presentationPrepared(caseSession, review.decision);
-    this.store.addMessage(caseSession, { role: 'helper', body: review.reply, replyToMessageId });
-    this.events.finalReplyCreated(caseSession, review.reply, review.decision);
-    return { caseSession, assistantMessage: review.reply, decision: review.decision };
+    return completePresentedTurn({
+      store: this.store,
+      events: this.events,
+      caseSession,
+      review,
+      replyToMessageId,
+    });
   }
 }

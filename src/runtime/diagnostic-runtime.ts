@@ -19,7 +19,7 @@ import { CaseTurnQueue } from './turn-queue.js';
 import { bindTurnContextCutoff, clearTurnContextCutoff } from '../sessions/turn-context-snapshot.js';
 import { WorkerDiagnosisService } from './worker-diagnosis.js';
 import { McpEvidenceService, type McpEvidenceServiceOptions } from '../mcp/evidence-service.js';
-import { caseStatusFromDiagnosticResult } from './review-gate.js';
+import { completePresentedTurn } from './turn-completion.js';
 
 export interface AgentResponse extends RuntimeTurnResponse {}
 export interface DiagnosticRuntimeOptions { mcp?: McpEvidenceServiceOptions }
@@ -188,20 +188,25 @@ export class DiagnosticRuntime {
         request: decision.request,
         result: mcpResult,
       };
+      caseSession.status = 'diagnosing';
       this.store.addRun(caseSession, run);
-      caseSession.status = caseStatusFromDiagnosticResult(mcpResult);
-      this.store.saveCase(caseSession);
       const review = await this.reviewer.reviewAndFormat(caseSession, mcpResult, run);
-      this.events.presentationPrepared(caseSession, review.decision);
-      this.store.addMessage(caseSession, { role: 'helper', body: review.reply, replyToMessageId });
-      this.events.finalReplyCreated(caseSession, review.reply, review.decision);
-      return { caseSession, assistantMessage: review.reply, decision: review.decision };
+      return completePresentedTurn({
+        store: this.store,
+        events: this.events,
+        caseSession,
+        review,
+        replyToMessageId,
+      });
     }
 
     const review = await this.workerDiagnosis.diagnose(caseSession, decision.request);
-    this.events.presentationPrepared(caseSession, review.decision);
-    this.store.addMessage(caseSession, { role: 'helper', body: review.reply, replyToMessageId });
-    this.events.finalReplyCreated(caseSession, review.reply, review.decision);
-    return { caseSession, assistantMessage: review.reply, decision: review.decision };
+    return completePresentedTurn({
+      store: this.store,
+      events: this.events,
+      caseSession,
+      review,
+      replyToMessageId,
+    });
   }
 }
