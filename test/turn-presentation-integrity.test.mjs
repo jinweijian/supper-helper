@@ -9,6 +9,7 @@ import { DiagnosticRuntime } from '../dist/runtime/diagnostic-runtime.js';
 import { NoopModelClient } from '../dist/providers/model/adapter.js';
 import { CaseRuntimeEventRecorder } from '../dist/runtime/event-recorder.js';
 import { ReviewPresentationService } from '../dist/runtime/review-presentation.js';
+import { completePresentedTurn } from '../dist/runtime/turn-completion.js';
 import { FileMemoryStore } from '../dist/storage.js';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -104,6 +105,58 @@ function createAgent(dir, worker) {
   const agent = new DiagnosticRuntime(config, store, worker);
   return { agent, store, config };
 }
+
+test('turn completion persists the formal helper reply before terminal case status', () => {
+  const order = [];
+  const caseSession = {
+    id: 'case_completion',
+    status: 'diagnosing',
+    messages: [],
+  };
+  const store = {
+    addMessage(session, message) {
+      order.push('helper_message');
+      session.messages.push({
+        ...message,
+        id: 'msg_helper',
+        createdAt: '2026-07-26T00:00:00.000Z',
+      });
+    },
+    saveCase() {
+      order.push('terminal_status');
+    },
+  };
+  const events = {
+    presentationPrepared() {
+      order.push('presentation_prepared');
+    },
+    finalReplyCreated() {
+      order.push('final_reply_created');
+    },
+  };
+
+  const response = completePresentedTurn({
+    store,
+    events,
+    caseSession,
+    review: {
+      reply: '已完成正式回复。',
+      decision: 'final',
+      caseStatus: 'concluded',
+    },
+    replyToMessageId: 'msg_user',
+  });
+
+  assert.deepEqual(order, [
+    'presentation_prepared',
+    'helper_message',
+    'final_reply_created',
+    'terminal_status',
+  ]);
+  assert.equal(caseSession.messages.at(-1).replyToMessageId, 'msg_user');
+  assert.equal(caseSession.status, 'concluded');
+  assert.equal(response.assistantMessage, '已完成正式回复。');
+});
 
 test('review freezes case status without publishing it before presentation', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turn-integrity-'));
