@@ -118,8 +118,17 @@ export function useChat(options: ChatOptions = {}) {
     error.value = '';
     progress.value = { state: 'running', startedAt: Date.now(), lastActivityAt: Date.now() };
     const request = jsonRequest('POST', { caseId, userMessageId });
-    await apiJson(fetcher, '/api/chat/retry', { ...request, signal });
-    assertCurrent(signal, currentGeneration);
+    try {
+      await apiJson(fetcher, '/api/chat/retry', { ...request, signal });
+      assertCurrent(signal, currentGeneration);
+    } catch (cause) {
+      if (isAbortError(cause)) throw cause;
+      assertCurrent(signal, currentGeneration);
+      const message = cause instanceof Error ? cause.message : '重试失败';
+      error.value = message;
+      progress.value = { ...progress.value, state: 'interrupted', error: message };
+      throw cause;
+    }
     return pollCurrent(caseId, userMessageId, signal, currentGeneration, onSession);
   }
 

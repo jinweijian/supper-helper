@@ -150,6 +150,44 @@ describe('dashboard composables', () => {
     expect(chat.progress.value).toMatchObject({ state: 'completed', session: { id: 'case_new' } });
   });
 
+  it('does not surface a late error from an older retry after newer progress completes', async () => {
+    let rejectOld!: (reason: Error) => void;
+    const fetcher = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>((_resolve, reject) => {
+        rejectOld = reject;
+      }))
+      .mockImplementationOnce(() => response({ session: {
+        id: 'case_new',
+        status: 'concluded',
+        messages: [{ id: 'msg_new_reply', role: 'helper', body: '新回复', replyToMessageId: 'msg_new' }],
+      } }));
+    const chat = useChat({ fetcher, pollDelayMs: 0, maxPolls: 1 });
+    const oldRetry = chat.retry('case_old', 'msg_old');
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    await expect(chat.poll('case_new', 'msg_new')).resolves.toMatchObject({ id: 'case_new' });
+
+    rejectOld(new Error('旧重试错误'));
+    await expect(oldRetry).rejects.toMatchObject({ name: 'AbortError' });
+    expect(chat.error.value).toBe('');
+    expect(chat.progress.value).toMatchObject({ state: 'completed', session: { id: 'case_new' } });
+  });
+
+  it('surfaces a current retry HTTP failure as an interrupted progress state', async () => {
+    const fetcher = vi.fn(() => response({ error: '重试请求失败' }, 503));
+    const chat = useChat({ fetcher });
+    const pending = chat.retry('case_a', 'msg_user');
+    const { startedAt, lastActivityAt } = chat.progress.value;
+
+    await expect(pending).rejects.toThrow('重试请求失败');
+    expect(chat.error.value).toBe('重试请求失败');
+    expect(chat.progress.value).toMatchObject({
+      state: 'interrupted',
+      error: '重试请求失败',
+      startedAt,
+      lastActivityAt,
+    });
+  });
+
   it('identifies the accepted user turn when a reloaded session is active', () => {
     expect(pendingUserMessageId({ id: 'case_a', title: 'A', status: 'diagnosing', runs: [], messages: [
       { id: 'msg_old', role: 'helper', body: '旧答复' },
