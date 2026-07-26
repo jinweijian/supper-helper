@@ -85,7 +85,7 @@ describe('dashboard composables', () => {
     expect(chat.progress.value.state).toBe('interrupted');
   });
 
-  it('aborts a pending chat request when cancelled without surfacing a user error', async () => {
+  it('aborts a pending chat request and clears operation-scoped UI when cancelled', async () => {
     let requestSignal: AbortSignal | undefined;
     const fetcher = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
       requestSignal = init?.signal ?? undefined;
@@ -94,10 +94,26 @@ describe('dashboard composables', () => {
     const chat = useChat({ fetcher });
     const pending = chat.send({ caseId: 'case_a', workspaceId: 'current', message: '问题', persona: 'operations' });
     await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    chat.error.value = '旧会话错误';
+    chat.progress.value = {
+      state: 'interrupted',
+      error: '旧会话已中断',
+      session: {
+        status: 'partial',
+        retryableTurn: {
+          userMessageId: 'msg_user',
+          interruptedAt: '2026-07-26T00:00:00.000Z',
+          reason: 'service_restarted',
+        },
+      },
+    };
+
     chat.cancel();
+
     expect(requestSignal?.aborted).toBe(true);
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
     expect(chat.error.value).toBe('');
+    expect(chat.progress.value).toEqual({ state: 'idle' });
   });
 
   it('does not let a late response from an older poll overwrite newer progress', async () => {

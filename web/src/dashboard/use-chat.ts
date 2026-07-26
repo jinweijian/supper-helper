@@ -143,6 +143,8 @@ export function useChat(options: ChatOptions = {}) {
     abortController?.abort();
     abortController = undefined;
     sending.value = false;
+    error.value = '';
+    progress.value = { state: 'idle' };
   }
 
   function assertCurrent(signal: AbortSignal, currentGeneration: number): void {

@@ -23,27 +23,34 @@ const logsOpener = ref<HTMLElement>();
 const settingsOpener = ref<HTMLElement>();
 const selectedPersona = ref('operations');
 const bannerError = computed(() => sessions.error.value);
+let disposed = false;
 
 onMounted(async () => {
+  window.addEventListener('popstate', onPopState);
   await sessions.initialize();
+  if (disposed) return;
   const current = sessions.current.value;
   if (current?.userPersona) selectedPersona.value = current.userPersona;
   if (current) knowledge.loadLocalHealth(current.workspaceId || 'current').catch(() => undefined);
   const pending = current ? pendingUserMessageId(current) : undefined;
   if (current && pending) {
-    chat.poll(current.id, pending, (session) => { if (sessions.current.value?.id === session.id) sessions.current.value = session; }).then((settled) => {
+    chat.poll(current.id, pending, (session) => {
+      if (!disposed && sessions.current.value?.id === session.id) sessions.current.value = session;
+    }).then((settled) => {
+      if (disposed) return;
       sessions.current.value = settled;
       return sessions.list();
     }).catch(() => undefined);
   }
-  window.addEventListener('popstate', onPopState);
 });
 onBeforeUnmount(() => {
+  disposed = true;
   chat.cancel();
   window.removeEventListener('popstate', onPopState);
 });
 
 async function onPopState(): Promise<void> {
+  if (disposed) return;
   chat.cancel();
   await sessions.initialize();
 }

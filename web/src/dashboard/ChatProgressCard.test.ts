@@ -6,8 +6,11 @@ import ChatProgressCard from './ChatProgressCard.vue';
 const appMocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   chatError: '',
-  initialize: vi.fn(async () => undefined),
+  currentSession: undefined as Record<string, unknown> | undefined,
+  initialize: vi.fn(async (): Promise<void> => undefined),
   open: vi.fn(async () => undefined),
+  pendingMessageId: '',
+  poll: vi.fn(async () => undefined),
   sessionError: '',
   sessionSummaries: [] as Array<Record<string, unknown>>,
 }));
@@ -15,13 +18,13 @@ const appMocks = vi.hoisted(() => ({
 vi.mock('./use-chat', async () => {
   const { ref } = await import('vue');
   return {
-    pendingUserMessageId: () => undefined,
+    pendingUserMessageId: () => appMocks.pendingMessageId || undefined,
     useChat: () => ({
       sending: ref(false),
       error: ref(appMocks.chatError),
       progress: ref({ state: 'idle' }),
       send: vi.fn(),
-      poll: vi.fn(),
+      poll: appMocks.poll,
       retry: vi.fn(),
       cancel: appMocks.cancel,
     }),
@@ -33,7 +36,7 @@ vi.mock('./use-sessions', async () => {
   return {
     useSessions: () => ({
       sessions: ref(appMocks.sessionSummaries),
-      current: ref(),
+      current: ref(appMocks.currentSession),
       loading: ref(false),
       error: ref(appMocks.sessionError),
       initialize: appMocks.initialize,
@@ -54,7 +57,7 @@ vi.mock('./use-knowledge', async () => {
       health: ref(),
       error: ref(''),
       loading: ref(false),
-      loadLocalHealth: vi.fn(),
+      loadLocalHealth: vi.fn(async () => undefined),
       probe: vi.fn(),
       bind: vi.fn(),
       reindex: vi.fn(),
@@ -90,6 +93,8 @@ describe('进度卡', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     appMocks.chatError = '';
+    appMocks.currentSession = undefined;
+    appMocks.pendingMessageId = '';
     appMocks.sessionError = '';
     appMocks.sessionSummaries = [];
   });
@@ -132,6 +137,8 @@ describe('Dashboard 聊天生命周期', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     appMocks.chatError = '';
+    appMocks.currentSession = undefined;
+    appMocks.pendingMessageId = '';
     appMocks.sessionError = '';
     appMocks.sessionSummaries = [];
   });
@@ -206,5 +213,41 @@ describe('Dashboard 聊天生命周期', () => {
     wrapper.unmount();
 
     expect(appMocks.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('初始化完成前卸载不会启动轮询或重新注册 popstate', async () => {
+    let resolveInitialize!: (value?: void) => void;
+    let popstateListener: EventListener | undefined;
+    const originalAddEventListener = window.addEventListener.bind(window);
+    const addEventListener = vi.spyOn(window, 'addEventListener').mockImplementation((type, listener, options) => {
+      if (type === 'popstate') popstateListener = listener as EventListener;
+      originalAddEventListener(type, listener, options);
+    });
+    appMocks.currentSession = {
+      id: 'case_pending',
+      title: '处理中',
+      status: 'diagnosing',
+      messages: [{ id: 'msg_pending', role: 'user', body: '问题' }],
+      runs: [],
+    };
+    appMocks.pendingMessageId = 'msg_pending';
+    appMocks.initialize.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      resolveInitialize = resolve;
+    }));
+    const wrapper = mountApp();
+    await vi.waitFor(() => expect(appMocks.initialize).toHaveBeenCalledTimes(1));
+
+    wrapper.unmount();
+    resolveInitialize();
+    await flushPromises();
+    expect(appMocks.poll).not.toHaveBeenCalled();
+
+    appMocks.initialize.mockClear();
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await flushPromises();
+    if (popstateListener) window.removeEventListener('popstate', popstateListener);
+    addEventListener.mockRestore();
+
+    expect(appMocks.initialize).not.toHaveBeenCalled();
   });
 });
