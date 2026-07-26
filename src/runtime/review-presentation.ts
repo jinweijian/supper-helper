@@ -38,7 +38,7 @@ export class ReviewPresentationService {
     const validated = validation.result;
     run.result = validated;
     run.status = validated.status;
-    caseSession.status = caseStatusFromDiagnosticResult(validated);
+    const caseStatus = caseStatusFromDiagnosticResult(validated);
     this.events.evidenceValidationResult(caseSession, run.id, validation);
     const frozenDecision = decisionFromDiagnosticResult(validated);
 
@@ -53,6 +53,7 @@ export class ReviewPresentationService {
           { caseId: caseSession.id, runId: run.id },
         ),
         decision: frozenDecision,
+        caseStatus,
       };
     }
 
@@ -63,6 +64,7 @@ export class ReviewPresentationService {
           return {
             reply,
             decision: frozenDecision,
+            caseStatus,
           };
         }
       } catch (error) {
@@ -77,6 +79,7 @@ export class ReviewPresentationService {
         ragAnswerability: run.request?.context?.knowledge?.answerability,
       }),
       decision: frozenDecision,
+      caseStatus,
     };
   }
 

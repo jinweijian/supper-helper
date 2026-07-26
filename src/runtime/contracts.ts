@@ -11,6 +11,7 @@ export interface RuntimeTurnResponse {
 export interface ReviewPresentationResult {
   reply: string;
   decision: RuntimeDecision;
+  caseStatus: StoredCase['status'];
 }
 
 export interface AcceptedUserTurn {

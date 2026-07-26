@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import test from 'node:test';
 import { DiagnosticRuntime } from '../dist/runtime/diagnostic-runtime.js';
+import { NoopModelClient } from '../dist/providers/model/adapter.js';
+import { CaseRuntimeEventRecorder } from '../dist/runtime/event-recorder.js';
+import { ReviewPresentationService } from '../dist/runtime/review-presentation.js';
 import { FileMemoryStore } from '../dist/storage.js';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -101,6 +104,38 @@ function createAgent(dir, worker) {
   const agent = new DiagnosticRuntime(config, store, worker);
   return { agent, store, config };
 }
+
+test('review freezes case status without publishing it before presentation', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turn-integrity-'));
+  try {
+    const { config, store } = createAgent(dir, { async diagnose() { return concludedWorkerResult(); } });
+    const caseSession = store.createCase({
+      tenantId: 'local',
+      userId: 'local-user',
+      workspaceId: 'current',
+      title: 'Review status contract',
+    });
+    caseSession.status = 'diagnosing';
+    const run = { id: 'run_review_status', caseId: caseSession.id, status: 'running' };
+    const reviewer = new ReviewPresentationService(
+      config,
+      new NoopModelClient(),
+      new CaseRuntimeEventRecorder(store),
+      '',
+      '',
+      '',
+    );
+
+    const review = await reviewer.reviewAndFormat(caseSession, concludedWorkerResult().result, run);
+
+    assert.equal(caseSession.status, 'diagnosing');
+    assert.equal(review.caseStatus, 'concluded');
+    assert.equal(run.status, 'concluded');
+    assert.equal(run.result.status, 'concluded');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 function modelChatResponse(content) {
   return new Response(
