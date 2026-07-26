@@ -34,6 +34,7 @@ import { planDeepQuery } from '../dist/runtime/deep-query-planner.js';
 import { curateSolvedCase, hasCuratableDiagnosticResult, isResolutionConfirmation } from '../dist/runtime/case-curator.js';
 import { runKnowledgeAcceptance } from '../dist/runtime/knowledge-acceptance.js';
 import { resolveSessionStorageRoot } from '../dist/sessions/storage-scope.js';
+import { findRetryableInterruption, markInheritedActiveTurnsRetryable } from '../dist/sessions/stale-turn.js';
 import { updateModelSettings } from '../dist/settings/model-settings.js';
 
 function baseConfig(rootDir) {
@@ -4000,6 +4001,326 @@ test('agents API and settings UI expose configured multi-agent settings', async 
     if (server) {
       await server.close();
     }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('retryable interruption requires its recorded placeholder message', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
+  try {
+    const store = new FileMemoryStore(dir);
+    const caseSession = store.createCase({
+      tenantId: 'local',
+      userId: 'local-user',
+      workspaceId: 'current',
+      title: '占位消息校验',
+    });
+    const userMessage = store.addMessage(caseSession, {
+      role: 'user',
+      body: '继续排查',
+    });
+    caseSession.status = 'ready_for_diagnosis';
+    store.saveCase(caseSession);
+
+    assert.equal(markInheritedActiveTurnsRetryable(caseSession, store), true);
+    const interruption = findRetryableInterruption(caseSession);
+    assert.equal(interruption?.userMessageId, userMessage.id);
+
+    caseSession.messages = caseSession.messages.filter((message) => message.id !== interruption.placeholderMessageId);
+
+    assert.equal(findRetryableInterruption(caseSession), undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('startup marks inherited active turns retryable without Run', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
+  let server;
+  try {
+    const config = baseConfig(dir);
+    config.server.port = 43984;
+    config.agent.useModelForPreflight = false;
+    config.agent.modelProvider = undefined;
+
+    server = await startServer({ config });
+    const caseSession = await fetch('http://127.0.0.1:43984/api/sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: '遗留会话' }),
+    }).then((res) => res.json());
+    await server.close();
+
+    const casePath = join(resolveSessionStorageRoot(config), 'cases', `${caseSession.session.id}.json`);
+    const persisted = JSON.parse(readFileSync(casePath, 'utf8'));
+    persisted.status = 'ready_for_diagnosis';
+    persisted.updatedAt = '2020-01-01T00:00:00.000Z';
+    persisted.messages.push({
+      id: 'msg_inherited_user',
+      role: 'user',
+      body: '遗留问题',
+      createdAt: '2020-01-01T00:00:00.000Z',
+    });
+    writeFileSync(casePath, `${JSON.stringify(persisted, null, 2)}\n`, 'utf8');
+
+    server = await startServer({ config });
+
+    const loaded = await fetch(`http://127.0.0.1:43984/api/session?caseId=${persisted.id}`).then((res) => res.json());
+    const helper = loaded.session.messages.find((message) => message.role === 'helper' && message.replyToMessageId === 'msg_inherited_user');
+
+    assert.equal(loaded.session.status, 'partial');
+    assert.ok(helper, 'should have interruption helper bound to original userMessageId');
+    assert.match(helper.body, /服务重启/);
+    assert.equal(loaded.session.retryableTurn?.userMessageId, 'msg_inherited_user');
+    assert.equal(loaded.session.retryableTurn?.reason, 'service_restarted');
+
+    const logs = await fetch(`http://127.0.0.1:43984/api/logs?caseId=${persisted.id}`).then((res) => res.json());
+    assert.equal(logs.blocks.some((log) => log.phase === 'turn_interrupted' && log.severity === 'warn'), true);
+  } finally {
+    if (server) await server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('startup marks inherited active turns retryable with running Run', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
+  let server;
+  try {
+    const config = baseConfig(dir);
+    config.server.port = 43985;
+    config.agent.useModelForPreflight = false;
+    config.agent.modelProvider = undefined;
+
+    server = await startServer({ config });
+    const caseSession = await fetch('http://127.0.0.1:43985/api/sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: '运行中会话' }),
+    }).then((res) => res.json());
+    await server.close();
+
+    const casePath = join(resolveSessionStorageRoot(config), 'cases', `${caseSession.session.id}.json`);
+    const persisted = JSON.parse(readFileSync(casePath, 'utf8'));
+    persisted.status = 'diagnosing';
+    persisted.updatedAt = '2020-01-01T00:00:00.000Z';
+    persisted.messages.push({
+      id: 'msg_running_user',
+      role: 'user',
+      body: '运行中问题',
+      createdAt: '2020-01-01T00:00:00.000Z',
+    });
+    persisted.runs.push({
+      id: 'run_running',
+      caseId: persisted.id,
+      status: 'running',
+    });
+    writeFileSync(casePath, `${JSON.stringify(persisted, null, 2)}\n`, 'utf8');
+
+    server = await startServer({ config });
+
+    const loaded = await fetch(`http://127.0.0.1:43985/api/session?caseId=${persisted.id}`).then((res) => res.json());
+
+    assert.equal(loaded.session.status, 'partial');
+    assert.equal(loaded.session.runs[0].status, 'partial');
+    assert.equal(loaded.session.retryableTurn?.userMessageId, 'msg_running_user');
+  } finally {
+    if (server) await server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('startup recovery is idempotent', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
+  let server;
+  try {
+    const config = baseConfig(dir);
+    config.server.port = 43986;
+    config.agent.useModelForPreflight = false;
+    config.agent.modelProvider = undefined;
+
+    server = await startServer({ config });
+    const caseSession = await fetch('http://127.0.0.1:43986/api/sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: '幂等测试' }),
+    }).then((res) => res.json());
+    await server.close();
+
+    const casePath = join(resolveSessionStorageRoot(config), 'cases', `${caseSession.session.id}.json`);
+    const persisted = JSON.parse(readFileSync(casePath, 'utf8'));
+    persisted.status = 'diagnosing';
+    persisted.updatedAt = '2020-01-01T00:00:00.000Z';
+    persisted.messages.push({
+      id: 'msg_idempotent_user',
+      role: 'user',
+      body: '幂等问题',
+      createdAt: '2020-01-01T00:00:00.000Z',
+    });
+    writeFileSync(casePath, `${JSON.stringify(persisted, null, 2)}\n`, 'utf8');
+
+    server = await startServer({ config });
+
+    const first = await fetch(`http://127.0.0.1:43986/api/session?caseId=${persisted.id}`).then((res) => res.json());
+    const second = await fetch(`http://127.0.0.1:43986/api/session?caseId=${persisted.id}`).then((res) => res.json());
+
+    const firstHelpers = first.session.messages.filter((m) => m.role === 'helper' && m.replyToMessageId === 'msg_idempotent_user');
+    const secondHelpers = second.session.messages.filter((m) => m.role === 'helper' && m.replyToMessageId === 'msg_idempotent_user');
+
+    assert.equal(firstHelpers.length, 1);
+    assert.equal(secondHelpers.length, 1);
+    assert.equal(firstHelpers[0].id, secondHelpers[0].id);
+  } finally {
+    if (server) await server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('startup recovery scans every persisted case beyond the default list limit', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
+  let server;
+  try {
+    const config = baseConfig(dir);
+    config.server.port = 0;
+    config.agent.useModelForPreflight = false;
+    config.agent.modelProvider = undefined;
+
+    server = await startServer({ config });
+    const created = [];
+    for (let index = 0; index < 31; index += 1) {
+      const response = await fetch(`${server.url}/api/sessions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: `恢复扫描 ${index}` }),
+      }).then((res) => res.json());
+      created.push(response.session);
+    }
+    await server.close();
+    server = undefined;
+
+    const oldest = created[0];
+    const casePath = join(resolveSessionStorageRoot(config), 'cases', `${oldest.id}.json`);
+    const persisted = JSON.parse(readFileSync(casePath, 'utf8'));
+    persisted.status = 'ready_for_diagnosis';
+    persisted.updatedAt = '2020-01-01T00:00:00.000Z';
+    persisted.messages.push({
+      id: 'msg_beyond_default_limit',
+      role: 'user',
+      body: '超过默认列表上限的遗留问题',
+      createdAt: '2020-01-01T00:00:00.000Z',
+    });
+    writeFileSync(casePath, `${JSON.stringify(persisted, null, 2)}\n`, 'utf8');
+
+    server = await startServer({ config });
+    const loaded = await fetch(`${server.url}/api/session?caseId=${persisted.id}`).then((res) => res.json());
+
+    assert.equal(loaded.session.status, 'partial');
+    assert.equal(loaded.session.retryableTurn?.userMessageId, 'msg_beyond_default_limit');
+  } finally {
+    if (server) await server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('retry accepts valid startup-interrupted turn', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
+  let server;
+  try {
+    const config = baseConfig(dir);
+    config.server.port = 43987;
+    config.agent.useModelForPreflight = false;
+    config.agent.modelProvider = undefined;
+
+    server = await startServer({ config });
+    const caseSession = await fetch('http://127.0.0.1:43987/api/sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: '重试测试' }),
+    }).then((res) => res.json());
+    await server.close();
+
+    const casePath = join(resolveSessionStorageRoot(config), 'cases', `${caseSession.session.id}.json`);
+    const persisted = JSON.parse(readFileSync(casePath, 'utf8'));
+    persisted.status = 'diagnosing';
+    persisted.updatedAt = '2020-01-01T00:00:00.000Z';
+    persisted.messages.push({
+      id: 'msg_retry_user',
+      role: 'user',
+      body: '重试问题',
+      createdAt: '2020-01-01T00:00:00.000Z',
+    });
+    writeFileSync(casePath, `${JSON.stringify(persisted, null, 2)}\n`, 'utf8');
+
+    server = await startServer({ config });
+
+    const before = await fetch(`http://127.0.0.1:43987/api/session?caseId=${persisted.id}`).then((res) => res.json());
+    assert.ok(before.session.retryableTurn, 'should have retryableTurn before retry');
+
+    const retry = await fetch('http://127.0.0.1:43987/api/chat/retry', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ caseId: persisted.id, userMessageId: 'msg_retry_user' }),
+    });
+    assert.equal(retry.status, 202);
+
+    const after = await fetch(`http://127.0.0.1:43987/api/session?caseId=${persisted.id}`).then((res) => res.json());
+    const placeholder = after.session.messages.find((m) => m.role === 'helper' && m.replyToMessageId === 'msg_retry_user' && /服务重启/.test(m.body));
+    assert.ok(!placeholder, 'interruption placeholder should be removed after retry');
+    assert.ok(!after.session.retryableTurn, 'retryableTurn should be gone after retry');
+
+    const logs = await fetch(`http://127.0.0.1:43987/api/logs?caseId=${persisted.id}`).then((res) => res.json());
+    assert.equal(logs.blocks.some((log) => log.phase === 'turn_retry_started'), true);
+  } finally {
+    if (server) await server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('retry rejects invalid or duplicate requests', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
+  let server;
+  try {
+    const config = baseConfig(dir);
+    config.server.port = 43988;
+    config.agent.useModelForPreflight = false;
+    config.agent.modelProvider = undefined;
+
+    server = await startServer({ config });
+
+    const caseSession = await fetch('http://127.0.0.1:43988/api/sessions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: '拒绝测试' }),
+    }).then((res) => res.json());
+
+    const missing = await fetch('http://127.0.0.1:43988/api/chat/retry', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.equal(missing.status, 400);
+
+    const malformed = await fetch('http://127.0.0.1:43988/api/chat/retry', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ caseId: 42, userMessageId: 42 }),
+    });
+    assert.equal(malformed.status, 400);
+
+    const notFound = await fetch('http://127.0.0.1:43988/api/chat/retry', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ caseId: 'case_nonexistent', userMessageId: 'msg_nonexistent' }),
+    });
+    assert.equal(notFound.status, 404);
+
+    const notRetryable = await fetch('http://127.0.0.1:43988/api/chat/retry', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ caseId: caseSession.session.id, userMessageId: 'msg_nonexistent' }),
+    });
+    assert.equal(notRetryable.status, 409);
+  } finally {
+    if (server) await server.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

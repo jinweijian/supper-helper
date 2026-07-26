@@ -71,8 +71,16 @@ describe('dashboard composables', () => {
   it('interrupts immediately when the matching turn is explicitly retryable', async () => {
     const fetcher = vi.fn(() => response({ session: {
       id: 'case_a',
-      status: 'diagnosing',
-      messages: [{ id: 'msg_user', role: 'user', body: '问题' }],
+      status: 'partial',
+      messages: [
+        { id: 'msg_user', role: 'user', body: '问题' },
+        {
+          id: 'msg_interruption',
+          role: 'helper',
+          body: '这个回合因服务重启被中断。',
+          replyToMessageId: 'msg_user',
+        },
+      ],
       retryableTurn: {
         userMessageId: 'msg_user',
         interruptedAt: '2026-07-26T00:00:00.000Z',
@@ -209,6 +217,29 @@ describe('dashboard composables', () => {
       { id: 'msg_old', role: 'helper', body: '旧答复' },
       { id: 'msg_pending', role: 'user', body: '继续' },
     ] })).toBe('msg_pending');
+  });
+
+  it('identifies a retryable interrupted turn when a partial session is reloaded', () => {
+    expect(pendingUserMessageId({
+      id: 'case_retryable',
+      title: '服务重启',
+      status: 'partial',
+      runs: [],
+      messages: [
+        { id: 'msg_user', role: 'user', body: '继续排查' },
+        {
+          id: 'msg_interruption',
+          role: 'helper',
+          body: '这个回合因服务重启被中断。',
+          replyToMessageId: 'msg_user',
+        },
+      ],
+      retryableTurn: {
+        userMessageId: 'msg_user',
+        interruptedAt: '2026-07-26T00:00:00.000Z',
+        reason: 'service_restarted',
+      },
+    })).toBe('msg_user');
   });
 
   it('only loads logs when explicitly opened or refreshed', async () => {

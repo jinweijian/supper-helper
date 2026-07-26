@@ -6,28 +6,38 @@ import ChatProgressCard from './ChatProgressCard.vue';
 const appMocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   chatError: '',
+  chatProgress: { state: 'idle' } as Record<string, unknown>,
   currentSession: undefined as Record<string, unknown> | undefined,
   initialize: vi.fn(async (): Promise<void> => undefined),
   open: vi.fn(async () => undefined),
   pendingMessageId: '',
   poll: vi.fn(async () => undefined),
+  progressRef: undefined as { value: Record<string, unknown> } | undefined,
   sessionError: '',
   sessionSummaries: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('./use-chat', async () => {
   const { ref } = await import('vue');
+  const actual = await vi.importActual<typeof import('./use-chat')>('./use-chat');
   return {
-    pendingUserMessageId: () => appMocks.pendingMessageId || undefined,
-    useChat: () => ({
-      sending: ref(false),
-      error: ref(appMocks.chatError),
-      progress: ref({ state: 'idle' }),
-      send: vi.fn(),
-      poll: appMocks.poll,
-      retry: vi.fn(),
-      cancel: appMocks.cancel,
-    }),
+    ...actual,
+    useChat: () => {
+      const progress = ref(appMocks.chatProgress);
+      appMocks.progressRef = progress;
+      return {
+        sending: ref(false),
+        error: ref(appMocks.chatError),
+        progress,
+        send: vi.fn(),
+        poll: appMocks.poll,
+        retry: vi.fn(),
+        cancel: () => {
+          appMocks.cancel();
+          progress.value = { state: 'idle' };
+        },
+      };
+    },
   };
 });
 
@@ -93,8 +103,10 @@ describe('进度卡', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     appMocks.chatError = '';
+    appMocks.chatProgress = { state: 'idle' };
     appMocks.currentSession = undefined;
     appMocks.pendingMessageId = '';
+    appMocks.progressRef = undefined;
     appMocks.sessionError = '';
     appMocks.sessionSummaries = [];
   });
@@ -137,8 +149,10 @@ describe('Dashboard 聊天生命周期', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     appMocks.chatError = '';
+    appMocks.chatProgress = { state: 'idle' };
     appMocks.currentSession = undefined;
     appMocks.pendingMessageId = '';
+    appMocks.progressRef = undefined;
     appMocks.sessionError = '';
     appMocks.sessionSummaries = [];
   });
@@ -176,10 +190,73 @@ describe('Dashboard 聊天生命周期', () => {
     wrapper.unmount();
   });
 
-  it('切换会话前取消旧聊天轮询', async () => {
-    appMocks.sessionSummaries = [{ id: 'case_next', title: '下一个会话', status: 'collecting_input' }];
+  it('直接打开可重试的 partial 会话时显示中断进度和一键重试', async () => {
+    const retryableSession = {
+      id: 'case_retryable',
+      title: '服务重启',
+      status: 'partial',
+      messages: [
+        { id: 'msg_user', role: 'user', body: '继续排查' },
+        {
+          id: 'msg_interruption',
+          role: 'helper',
+          body: '这个回合因服务重启被中断。',
+          replyToMessageId: 'msg_user',
+        },
+      ],
+      runs: [],
+      retryableTurn: {
+        userMessageId: 'msg_user',
+        interruptedAt: '2026-07-26T00:00:00.000Z',
+        reason: 'service_restarted',
+      },
+    };
+    appMocks.currentSession = retryableSession;
+    appMocks.poll.mockImplementationOnce(async () => {
+      if (appMocks.progressRef) {
+        appMocks.progressRef.value = {
+          state: 'interrupted',
+          error: '这个回合因服务重启被中断，你可以点击“一键重试”继续。',
+          session: retryableSession,
+        };
+      }
+      throw new Error('这个回合因服务重启被中断，你可以点击“一键重试”继续。');
+    });
+
     const wrapper = mountApp();
     await flushPromises();
+
+    const pollCalls = appMocks.poll.mock.calls;
+    const retryLabel = wrapper.get('.retry-button').text();
+    wrapper.unmount();
+    expect(pollCalls).toContainEqual(['case_retryable', 'msg_user', expect.any(Function)]);
+    expect(retryLabel).toBe('一键重试');
+  });
+
+  it('切换会话前取消旧聊天轮询', async () => {
+    appMocks.sessionSummaries = [{ id: 'case_next', title: '下一个会话', status: 'collecting_input' }];
+    appMocks.currentSession = {
+      id: 'case_old',
+      title: '旧会话',
+      status: 'partial',
+      messages: [],
+      runs: [],
+    };
+    appMocks.chatProgress = {
+      state: 'interrupted',
+      error: '服务重启中断',
+      session: {
+        status: 'partial',
+        retryableTurn: {
+          userMessageId: 'msg_old',
+          interruptedAt: '2026-07-26T00:00:00.000Z',
+          reason: 'service_restarted',
+        },
+      },
+    };
+    const wrapper = mountApp();
+    await flushPromises();
+    expect(wrapper.get('.retry-button').text()).toBe('一键重试');
     appMocks.cancel.mockClear();
     appMocks.open.mockClear();
 
@@ -188,6 +265,7 @@ describe('Dashboard 聊天生命周期', () => {
 
     expect(appMocks.cancel).toHaveBeenCalledTimes(1);
     expect(appMocks.cancel.mock.invocationCallOrder[0]).toBeLessThan(appMocks.open.mock.invocationCallOrder[0]!);
+    expect(wrapper.find('.retry-button').exists()).toBe(false);
     wrapper.unmount();
   });
 

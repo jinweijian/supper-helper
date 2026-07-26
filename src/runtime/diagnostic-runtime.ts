@@ -19,6 +19,7 @@ import { CaseTurnQueue } from './turn-queue.js';
 import { bindTurnContextCutoff, clearTurnContextCutoff } from '../sessions/turn-context-snapshot.js';
 import { WorkerDiagnosisService } from './worker-diagnosis.js';
 import { McpEvidenceService, type McpEvidenceServiceOptions } from '../mcp/evidence-service.js';
+import { findRetryableInterruption, markInheritedActiveTurnsRetryable, removeInterruptionPlaceholder } from '../sessions/stale-turn.js';
 import { completePresentedTurn } from './turn-completion.js';
 
 export interface AgentResponse extends RuntimeTurnResponse {}
@@ -110,6 +111,56 @@ export class DiagnosticRuntime {
 
   recordTurnFailure(caseId: string, error: unknown, replyToMessageId?: string): void {
     this.sessions.recordTurnFailure(caseId, error, replyToMessageId);
+  }
+
+  recoverInterruptedTurns(): void {
+    const cases = this.store.listCases(Number.MAX_SAFE_INTEGER);
+    for (const caseSession of cases) {
+      markInheritedActiveTurnsRetryable(caseSession, this.store);
+    }
+  }
+
+  retryInterruptedTurn(caseId: string, userMessageId: string): { accepted: boolean; caseId: string; userMessageId: string } {
+    const caseSession = this.store.loadCase(caseId);
+    if (!caseSession) {
+      throw new RetryableTurnError('case not found', 404);
+    }
+    if (caseSession.archivedAt) {
+      throw new RetryableTurnError('session is archived and cannot continue', 409);
+    }
+
+    const interruption = findRetryableInterruption(caseSession);
+    if (!interruption) {
+      throw new RetryableTurnError('turn is not retryable', 409);
+    }
+    if (interruption.userMessageId !== userMessageId) {
+      throw new RetryableTurnError('turn is not retryable', 409);
+    }
+
+    const userMessage = caseSession.messages.find((m) => m.id === userMessageId && m.role === 'user');
+    if (!userMessage) {
+      throw new RetryableTurnError('user message not found', 404);
+    }
+
+    removeInterruptionPlaceholder(caseSession, interruption.placeholderMessageId);
+
+    this.store.addLogEvent(caseSession, {
+      actor: 'system',
+      phase: 'turn_retry_started',
+      label: '重试开始',
+      severity: 'ok',
+      summary: '用户点击一键重试，正在重新执行原回合。',
+      detail: { userMessageId },
+    });
+
+    caseSession.status = 'ready_for_diagnosis';
+    this.store.saveCase(caseSession);
+
+    void this.completeUserTurn(caseId, userMessageId).catch((error) => {
+      this.recordTurnFailure(caseId, error, userMessageId);
+    });
+
+    return { accepted: true, caseId, userMessageId };
   }
 
   private async completeUserTurnNow(caseId: string, userMessageId: string): Promise<AgentResponse> {
@@ -208,5 +259,12 @@ export class DiagnosticRuntime {
       review,
       replyToMessageId,
     });
+  }
+}
+
+export class RetryableTurnError extends Error {
+  constructor(message: string, readonly statusCode: number) {
+    super(message);
+    this.name = 'RetryableTurnError';
   }
 }

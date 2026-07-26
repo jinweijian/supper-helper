@@ -3,6 +3,7 @@ import { resolveContextWindowTokens, type SuperHelperConfig } from '../../config
 import { estimateCaseContextUsage } from '../../context-window.js';
 import type { UserPersona } from '../../domain.js';
 import type { DiagnosticRuntime } from '../../runtime/diagnostic-runtime.js';
+import { RetryableTurnError } from '../../runtime/diagnostic-runtime.js';
 import { readJson, sendJson } from '../http-utils.js';
 import { assertChatMessageSize, requireCaseId, resolveConfiguredWorkspaceId } from '../request-contracts.js';
 
@@ -13,7 +14,15 @@ export async function handleChatRoutes(
   config: SuperHelperConfig,
   agent: DiagnosticRuntime,
 ): Promise<boolean> {
-  if (req.method !== 'POST' || url.pathname !== '/api/chat') {
+  if (req.method !== 'POST') {
+    return false;
+  }
+
+  if (url.pathname === '/api/chat/retry') {
+    return handleRetryRoute(req, res, agent);
+  }
+
+  if (url.pathname !== '/api/chat') {
     return false;
   }
 
@@ -81,5 +90,35 @@ export async function handleChatRoutes(
     persona: response.caseSession.userPersona,
     contextUsage: estimateCaseContextUsage(response.caseSession, resolveContextWindowTokens(config)),
   });
+  return true;
+}
+
+async function handleRetryRoute(
+  req: IncomingMessage,
+  res: ServerResponse,
+  agent: DiagnosticRuntime,
+): Promise<boolean> {
+  const body = (await readJson(req)) as { caseId?: unknown; userMessageId?: unknown };
+  if (
+    typeof body.caseId !== 'string'
+    || typeof body.userMessageId !== 'string'
+    || !body.userMessageId
+    || body.userMessageId.length > 128
+  ) {
+    sendJson(res, 400, { error: 'caseId and userMessageId are required' });
+    return true;
+  }
+  const caseId = requireCaseId(body.caseId);
+
+  try {
+    const result = agent.retryInterruptedTurn(caseId, body.userMessageId);
+    sendJson(res, 202, { accepted: true, caseId: result.caseId, userMessageId: result.userMessageId });
+  } catch (error) {
+    if (error instanceof RetryableTurnError) {
+      sendJson(res, error.statusCode, { error: error.message });
+    } else {
+      throw error;
+    }
+  }
   return true;
 }

@@ -17,6 +17,7 @@ interface SendInput {
 }
 
 export function pendingUserMessageId(session: SessionDto): string | undefined {
+  if (session.retryableTurn) return session.retryableTurn.userMessageId;
   if (!['diagnosing', 'queued', 'ready_for_diagnosis'].includes(session.status)) return undefined;
   return [...session.messages].reverse().find((message) => message.role === 'user' && !hasHelperReply(session, message.id))?.id;
 }
@@ -95,14 +96,14 @@ export function useChat(options: ChatOptions = {}) {
       reconnectDelay = 500;
       progress.value = { ...progress.value, state: 'running', lastActivityAt: Date.now(), session: body.session };
       onSession?.(body.session);
-      if (hasHelperReply(body.session, userMessageId)) {
-        progress.value = { ...progress.value, state: 'completed', session: body.session };
-        return body.session;
-      }
       if (body.session.retryableTurn?.userMessageId === userMessageId) {
         const message = '这个回合因服务重启被中断，你可以点击“一键重试”继续。';
         progress.value = { ...progress.value, state: 'interrupted', session: body.session, error: message };
         throw new Error(message);
+      }
+      if (hasHelperReply(body.session, userMessageId)) {
+        progress.value = { ...progress.value, state: 'completed', session: body.session };
+        return body.session;
       }
       await delay(options.pollDelayMs ?? 500, signal);
       assertCurrent(signal, currentGeneration);

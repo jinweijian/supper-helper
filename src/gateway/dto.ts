@@ -6,6 +6,7 @@ import type { KnowledgeHealthSummary } from '../knowledge/health.js';
 import { caseStatusFromDiagnosticResult } from '../runtime/review-gate.js';
 import type { StoredCase } from '../sessions/case-repository.js';
 import { sanitizeWorkerTrace } from '../observability/worker-trace.js';
+import { findRetryableInterruption } from '../sessions/stale-turn.js';
 
 export type {
   ClaudeSettingsInput,
@@ -52,9 +53,15 @@ export interface AgentActivityItem {
   severity: string;
 }
 
+export interface RetryableTurnDto {
+  userMessageId: string;
+  interruptedAt: string;
+  reason: 'service_restarted';
+}
+
 export type SerializedSession = SessionSummary
   & Pick<StoredCase, 'messages' | 'runs'>
-  & { knowledgeHealth?: KnowledgeHealthSummary };
+  & { knowledgeHealth?: KnowledgeHealthSummary; retryableTurn?: RetryableTurnDto };
 
 export interface SerializeSessionOptions {
   knowledgeHealth?: KnowledgeHealthSummary;
@@ -109,6 +116,17 @@ export function serializeSession(
   };
   if (options.knowledgeHealth) {
     session.knowledgeHealth = options.knowledgeHealth;
+  }
+  const interruption = findRetryableInterruption(caseSession);
+  if (interruption) {
+    const interruptedLog = caseSession.logs.find(
+      (log) => log.phase === 'turn_interrupted' && (log.detail as Record<string, unknown> | undefined)?.userMessageId === interruption.userMessageId,
+    );
+    session.retryableTurn = {
+      userMessageId: interruption.userMessageId,
+      interruptedAt: interruptedLog?.createdAt ?? caseSession.updatedAt,
+      reason: 'service_restarted',
+    };
   }
   return session;
 }

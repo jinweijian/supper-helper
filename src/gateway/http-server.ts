@@ -46,6 +46,8 @@ export function startServer(options: StartServerOptions): Promise<StartedServer>
     onboarding.recoverInterrupted();
   }
 
+  context.agent.recoverInterruptedTurns();
+
   const server = createServer(async (req, res) => {
     try {
       await route(req, res, context, onboarding, secrets);
