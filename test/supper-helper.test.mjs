@@ -3888,6 +3888,38 @@ test('async turn failures can reply to the accepted user message', () => {
   }
 });
 
+test('failure reply before partial persists the bound helper reply in the first partial snapshot', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
+  try {
+    class SnapshotStore extends FileMemoryStore {
+      snapshots = [];
+
+      saveCase(caseSession) {
+        super.saveCase(caseSession);
+        this.snapshots.push(structuredClone(caseSession));
+      }
+    }
+
+    const config = baseConfig(dir);
+    const store = new SnapshotStore(dir);
+    const worker = { async diagnose() { throw new Error('not used'); } };
+    const agent = new DiagnosticRuntime(config, store, worker);
+    const turn = agent.startUserTurn({ message: '失败回复必须先于终态持久化' });
+    store.snapshots = [];
+
+    agent.recordTurnFailure(turn.caseSession.id, new Error('worker failed'), turn.userMessageId);
+
+    const firstPartial = store.snapshots.find((snapshot) => snapshot.status === 'partial');
+    assert.ok(firstPartial, 'should persist a partial snapshot');
+    assert.deepEqual(firstPartial.messages.filter((message) => message.role === 'helper').map((message) => ({
+      role: message.role,
+      replyToMessageId: message.replyToMessageId,
+    })), [{ role: 'helper', replyToMessageId: turn.userMessageId }]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('session API recovers stale in-progress runs instead of polling forever', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
   let server;

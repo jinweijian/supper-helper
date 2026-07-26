@@ -73,9 +73,9 @@ export class SessionLifecycle {
 
     const message = error instanceof Error ? error.message : String(error);
     const reply = `请求中断了，我没有继续假装思考。\n\n原因：${message}\n\n请打开“查看诊断日志”查看卡在哪一步。`;
-    caseSession.status = 'partial';
     this.events.turnFailed(caseSession, message);
     this.store.addMessage(caseSession, { role: 'helper', body: reply, replyToMessageId });
+    caseSession.status = 'partial';
     this.store.saveCase(caseSession);
   }
 
