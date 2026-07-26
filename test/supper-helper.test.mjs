@@ -227,6 +227,38 @@ test('final worker result without claim role and answers is downgraded instead o
   assert.equal(summary.status, 'partial');
 });
 
+test('session summary keeps a newly accepted turn active despite an older terminal run', () => {
+  const summary = sessionSummary({
+    id: 'case_turn_race',
+    claudeSessionId: 'claude-session',
+    tenantId: 'local',
+    userId: 'local-user',
+    workspaceId: 'current',
+    title: '继续追问',
+    status: 'ready_for_diagnosis',
+    userPersona: 'operations',
+    messages: [{ id: 'msg_new', role: 'user', body: '新的问题' }],
+    runs: [{
+      id: 'run_old',
+      caseId: 'case_turn_race',
+      status: 'partial',
+      result: {
+        status: 'partial',
+        summary: '旧回合',
+        evidence: [],
+        claims: [],
+        missingInfo: ['旧信息'],
+        recommendedNextAction: 'ask_user',
+      },
+    }],
+    logs: [],
+    createdAt: '2026-07-26T00:00:00.000Z',
+    updatedAt: '2026-07-26T00:00:01.000Z',
+  });
+
+  assert.equal(summary.status, 'ready_for_diagnosis');
+});
+
 test('settings API sanitizes secrets and can test model connectivity', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
   const originalFetch = globalThis.fetch;

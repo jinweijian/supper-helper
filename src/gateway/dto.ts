@@ -81,15 +81,17 @@ export function sessionSummary(caseSession: StoredCase, config?: SuperHelperConf
   };
 }
 
+const ACTIVE_CASE_STATUSES: StoredCase['status'][] = [
+  'ready_for_diagnosis',
+  'diagnosing',
+];
+
 function publicSessionStatus(caseSession: StoredCase): StoredCase['status'] {
-  if (caseSession.runs.some((run) => run.status === 'queued' || run.status === 'running')) {
-    return caseSession.status === 'diagnosing' ? 'diagnosing' : caseSession.status;
-  }
-  const latestResult = [...caseSession.runs].reverse().find((run) => run.result)?.result;
-  if (!latestResult) {
+  if (ACTIVE_CASE_STATUSES.includes(caseSession.status)) {
     return caseSession.status;
   }
-  return caseStatusFromDiagnosticResult(latestResult);
+  const latestResult = [...caseSession.runs].reverse().find((run) => run.result)?.result;
+  return latestResult ? caseStatusFromDiagnosticResult(latestResult) : caseSession.status;
 }
 
 export function serializeSession(
