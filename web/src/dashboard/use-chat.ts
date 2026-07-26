@@ -17,8 +17,12 @@ interface SendInput {
 }
 
 export function pendingUserMessageId(session: SessionDto): string | undefined {
-  if (!['diagnosing', 'queued'].includes(session.status)) return undefined;
-  return [...session.messages].reverse().find((message) => message.role === 'user')?.id;
+  if (!['diagnosing', 'queued', 'ready_for_diagnosis'].includes(session.status)) return undefined;
+  return [...session.messages].reverse().find((message) => message.role === 'user' && !hasHelperReply(session, message.id))?.id;
+}
+
+function hasHelperReply(session: SessionDto, userMessageId: string): boolean {
+  return session.messages.some((message) => message.role === 'helper' && message.replyToMessageId === userMessageId);
 }
 
 export function useChat(options: ChatOptions = {}) {
@@ -26,53 +30,143 @@ export function useChat(options: ChatOptions = {}) {
   const sending = ref(false);
   const error = ref('');
   const progress = ref<ChatProgressState>({ state: 'idle' });
+  let abortController: AbortController | undefined;
+  let generation = 0;
 
   async function send(input: SendInput, onSession?: (session: SessionDto) => void): Promise<SessionDto> {
+    const { currentGeneration, signal } = startOperation();
     sending.value = true;
     error.value = '';
     progress.value = { state: 'running', startedAt: Date.now(), lastActivityAt: Date.now() };
     try {
+      const request = jsonRequest('POST', { ...input, async: true });
       const accepted = await apiJson<{ caseId: string; userMessageId: string }>(
         fetcher,
         '/api/chat',
-        jsonRequest('POST', { ...input, async: true }),
+        { ...request, signal },
       );
-      return await poll(accepted.caseId, accepted.userMessageId, onSession);
+      assertCurrent(signal, currentGeneration);
+      return await pollCurrent(accepted.caseId, accepted.userMessageId, signal, currentGeneration, onSession);
     } catch (cause) {
+      if (isAbortError(cause)) throw cause;
+      assertCurrent(signal, currentGeneration);
       error.value = cause instanceof Error ? cause.message : '发送失败';
       throw cause;
     } finally {
-      sending.value = false;
+      if (currentGeneration === generation) sending.value = false;
     }
   }
 
   async function poll(caseId: string, userMessageId: string, onSession?: (session: SessionDto) => void): Promise<SessionDto> {
+    const { currentGeneration, signal } = startOperation();
+    return pollCurrent(caseId, userMessageId, signal, currentGeneration, onSession);
+  }
+
+  async function pollCurrent(
+    caseId: string,
+    userMessageId: string,
+    signal: AbortSignal,
+    currentGeneration: number,
+    onSession?: (session: SessionDto) => void,
+  ): Promise<SessionDto> {
     if (progress.value.state !== 'running') progress.value = { state: 'running', startedAt: Date.now(), lastActivityAt: Date.now() };
-    const maxPolls = options.maxPolls ?? 120;
+    const maxPolls = options.maxPolls ?? Infinity;
+    let reconnectDelay = 500;
     for (let index = 0; index < maxPolls; index += 1) {
-      const body = await apiJson<{ session: SessionDto }>(fetcher, `/api/session?caseId=${encodeURIComponent(caseId)}&includeKnowledgeHealth=false`);
+      assertCurrent(signal, currentGeneration);
+      let body: { session: SessionDto };
+      try {
+        body = await apiJson<{ session: SessionDto }>(
+          fetcher,
+          `/api/session?caseId=${encodeURIComponent(caseId)}&includeKnowledgeHealth=false`,
+          { signal },
+        );
+        assertCurrent(signal, currentGeneration);
+      } catch (cause) {
+        if (isAbortError(cause)) throw cause;
+        assertCurrent(signal, currentGeneration);
+        progress.value = { ...progress.value, state: 'reconnecting', error: '网络连接中断，正在重新连接…' };
+        await delay(reconnectDelay, signal);
+        assertCurrent(signal, currentGeneration);
+        reconnectDelay = Math.min(reconnectDelay * 2, 5000);
+        continue;
+      }
+
+      reconnectDelay = 500;
       progress.value = { ...progress.value, state: 'running', lastActivityAt: Date.now(), session: body.session };
       onSession?.(body.session);
-      const reply = body.session.messages.find((message) =>
-        message.role === 'assistant' && message.replyToMessageId === userMessageId,
-      );
-      const active = body.session.status === 'diagnosing' || body.session.status === 'queued';
-      if (reply) { progress.value = { ...progress.value, state: 'completed', session: body.session }; return body.session; }
-      if (!active) {
-        const message = '回答已中断：诊断已停止但没有返回回复';
+      if (hasHelperReply(body.session, userMessageId)) {
+        progress.value = { ...progress.value, state: 'completed', session: body.session };
+        return body.session;
+      }
+      if (body.session.retryableTurn?.userMessageId === userMessageId) {
+        const message = '这个回合因服务重启被中断，你可以点击“一键重试”继续。';
         progress.value = { ...progress.value, state: 'interrupted', session: body.session, error: message };
         throw new Error(message);
       }
-      await delay(options.pollDelayMs ?? 500);
+      await delay(options.pollDelayMs ?? 500, signal);
+      assertCurrent(signal, currentGeneration);
     }
+    assertCurrent(signal, currentGeneration);
     const message = '等待回复超时，请刷新会话重试';
     progress.value = { ...progress.value, state: 'interrupted', error: message };
     throw new Error(message);
   }
 
-  return { sending, error, progress, send, poll };
+  async function retry(caseId: string, userMessageId: string, onSession?: (session: SessionDto) => void): Promise<SessionDto> {
+    const { currentGeneration, signal } = startOperation();
+    error.value = '';
+    progress.value = { state: 'running', startedAt: Date.now(), lastActivityAt: Date.now() };
+    const request = jsonRequest('POST', { caseId, userMessageId });
+    await apiJson(fetcher, '/api/chat/retry', { ...request, signal });
+    assertCurrent(signal, currentGeneration);
+    return pollCurrent(caseId, userMessageId, signal, currentGeneration, onSession);
+  }
+
+  function startOperation(): { currentGeneration: number; signal: AbortSignal } {
+    cancel();
+    abortController = new AbortController();
+    return { currentGeneration: generation, signal: abortController.signal };
+  }
+
+  function cancel(): void {
+    generation += 1;
+    abortController?.abort();
+    abortController = undefined;
+    sending.value = false;
+  }
+
+  function assertCurrent(signal: AbortSignal, currentGeneration: number): void {
+    if (signal.aborted || currentGeneration !== generation) {
+      throw new DOMException('aborted', 'AbortError');
+    }
+  }
+
+  return { sending, error, progress, send, poll, retry, cancel };
 }
 
-function delay(milliseconds: number): Promise<void> {
-  return milliseconds > 0 ? new Promise((resolve) => setTimeout(resolve, milliseconds)) : Promise.resolve();
+function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  if (milliseconds <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('aborted', 'AbortError'));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('aborted', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, milliseconds);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function isAbortError(cause: unknown): boolean {
+  return typeof cause === 'object'
+    && cause !== null
+    && 'name' in cause
+    && cause.name === 'AbortError';
 }

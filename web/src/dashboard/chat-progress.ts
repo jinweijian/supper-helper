@@ -1,7 +1,7 @@
 import type { SessionDto } from '../shared/contracts';
 
 export interface ChatProgressState {
-  state: 'idle' | 'running' | 'completed' | 'interrupted';
+  state: 'idle' | 'running' | 'completed' | 'interrupted' | 'reconnecting';
   startedAt?: number;
   lastActivityAt?: number;
   session?: Pick<SessionDto, 'status' | 'agentActivity'>;

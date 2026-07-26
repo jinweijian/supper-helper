@@ -39,28 +39,120 @@ describe('dashboard composables', () => {
     const fetcher = vi.fn()
       .mockImplementationOnce(() => response({ accepted: true, caseId: 'case_a', userMessageId: 'msg_user' }, 202))
       .mockImplementationOnce(() => response({ session: { id: 'case_a', status: 'diagnosing', messages: [{ id: 'msg_user', role: 'user', body: '问题' }] } }))
-      .mockImplementationOnce(() => response({ session: { id: 'case_a', status: 'concluded', messages: [{ id: 'msg_user', role: 'user', body: '问题' }, { id: 'msg_helper', role: 'assistant', body: '答复', replyToMessageId: 'msg_user' }] } }));
+      .mockImplementationOnce(() => response({ session: { id: 'case_a', status: 'concluded', messages: [{ id: 'msg_user', role: 'user', body: '问题' }, { id: 'msg_helper', role: 'helper', body: '答复', replyToMessageId: 'msg_user' }] } }));
     const chat = useChat({ fetcher, pollDelayMs: 0 });
     const session = await chat.send({ caseId: 'case_a', workspaceId: 'current', message: '问题', persona: 'operations' });
     expect(session.messages.at(-1)?.body).toBe('答复');
     expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher.mock.calls.map(([, init]) => init?.signal instanceof AbortSignal)).toEqual([true, true, true]);
   });
 
-  it('publishes every polled session and interrupts when diagnosis stops without a reply', async () => {
+  it('keeps polling across a transient terminal snapshot until the matching reply appears', async () => {
     const fetcher = vi.fn()
-      .mockImplementationOnce(() => response({ session: { id: 'case_a', status: 'queued', messages: [] } }))
-      .mockImplementationOnce(() => response({ session: { id: 'case_a', status: 'diagnosing', messages: [] } }))
-      .mockImplementationOnce(() => response({ session: { id: 'case_a', status: 'partial', messages: [] } }));
-    const chat = useChat({ fetcher, pollDelayMs: 0 });
-    const seen: string[] = [];
-    await expect(chat.poll('case_a', 'msg_user', (session) => seen.push(session.status))).rejects.toThrow('回答已中断');
-    expect(seen).toEqual(['queued', 'diagnosing', 'partial']);
+      .mockImplementationOnce(() => response({ session: {
+        id: 'case_a',
+        status: 'partial',
+        messages: [{ id: 'msg_user', role: 'user', body: '问题' }],
+      } }))
+      .mockImplementationOnce(() => response({ session: {
+        id: 'case_a',
+        status: 'concluded',
+        messages: [
+          { id: 'msg_user', role: 'user', body: '问题' },
+          { id: 'msg_helper', role: 'helper', body: '正式回复', replyToMessageId: 'msg_user' },
+        ],
+      } }));
+    const chat = useChat({ fetcher, pollDelayMs: 0, maxPolls: 2 });
+    await expect(chat.poll('case_a', 'msg_user')).resolves.toMatchObject({ status: 'concluded' });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(chat.progress.value.state).toBe('completed');
+  });
+
+  it('interrupts immediately when the matching turn is explicitly retryable', async () => {
+    const fetcher = vi.fn(() => response({ session: {
+      id: 'case_a',
+      status: 'diagnosing',
+      messages: [{ id: 'msg_user', role: 'user', body: '问题' }],
+      retryableTurn: {
+        userMessageId: 'msg_user',
+        interruptedAt: '2026-07-26T00:00:00.000Z',
+        reason: 'service_restarted',
+      },
+    } }));
+    const chat = useChat({ fetcher, pollDelayMs: 0, maxPolls: 2 });
+    await expect(chat.poll('case_a', 'msg_user')).rejects.toThrow('一键重试');
+    expect(fetcher).toHaveBeenCalledTimes(1);
     expect(chat.progress.value.state).toBe('interrupted');
+  });
+
+  it('aborts a pending chat request when cancelled without surfacing a user error', async () => {
+    let requestSignal: AbortSignal | undefined;
+    const fetcher = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      requestSignal = init?.signal ?? undefined;
+      requestSignal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+    }));
+    const chat = useChat({ fetcher });
+    const pending = chat.send({ caseId: 'case_a', workspaceId: 'current', message: '问题', persona: 'operations' });
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    chat.cancel();
+    expect(requestSignal?.aborted).toBe(true);
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(chat.error.value).toBe('');
+  });
+
+  it('does not let a late response from an older poll overwrite newer progress', async () => {
+    let resolveOld!: (value: Response) => void;
+    let oldSignal: AbortSignal | undefined;
+    const fetcher = vi.fn()
+      .mockImplementationOnce((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((resolve) => {
+        oldSignal = init?.signal ?? undefined;
+        resolveOld = resolve;
+      }))
+      .mockImplementationOnce(() => response({ session: {
+        id: 'case_new',
+        status: 'concluded',
+        messages: [{ id: 'msg_new_reply', role: 'helper', body: '新回复', replyToMessageId: 'msg_new' }],
+      } }));
+    const chat = useChat({ fetcher, pollDelayMs: 0, maxPolls: 1 });
+    const oldPoll = chat.poll('case_old', 'msg_old');
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    await expect(chat.poll('case_new', 'msg_new')).resolves.toMatchObject({ id: 'case_new' });
+    expect(oldSignal?.aborted).toBe(true);
+
+    resolveOld(await response({ session: {
+      id: 'case_old',
+      status: 'concluded',
+      messages: [{ id: 'msg_old_reply', role: 'helper', body: '旧回复', replyToMessageId: 'msg_old' }],
+    } }));
+    await expect(oldPoll).rejects.toMatchObject({ name: 'AbortError' });
+    expect(chat.progress.value).toMatchObject({ state: 'completed', session: { id: 'case_new' } });
+  });
+
+  it('does not surface a late error from an older send after newer progress completes', async () => {
+    let rejectOld!: (reason: Error) => void;
+    const fetcher = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>((_resolve, reject) => {
+        rejectOld = reject;
+      }))
+      .mockImplementationOnce(() => response({ session: {
+        id: 'case_new',
+        status: 'concluded',
+        messages: [{ id: 'msg_new_reply', role: 'helper', body: '新回复', replyToMessageId: 'msg_new' }],
+      } }));
+    const chat = useChat({ fetcher, pollDelayMs: 0, maxPolls: 1 });
+    const oldSend = chat.send({ caseId: 'case_old', workspaceId: 'current', message: '旧问题', persona: 'operations' });
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    await expect(chat.poll('case_new', 'msg_new')).resolves.toMatchObject({ id: 'case_new' });
+
+    rejectOld(new Error('旧请求错误'));
+    await expect(oldSend).rejects.toMatchObject({ name: 'AbortError' });
+    expect(chat.error.value).toBe('');
+    expect(chat.progress.value).toMatchObject({ state: 'completed', session: { id: 'case_new' } });
   });
 
   it('identifies the accepted user turn when a reloaded session is active', () => {
     expect(pendingUserMessageId({ id: 'case_a', title: 'A', status: 'diagnosing', runs: [], messages: [
-      { id: 'msg_old', role: 'assistant', body: '旧答复' },
+      { id: 'msg_old', role: 'helper', body: '旧答复' },
       { id: 'msg_pending', role: 'user', body: '继续' },
     ] })).toBe('msg_pending');
   });

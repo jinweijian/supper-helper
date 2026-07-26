@@ -1,9 +1,15 @@
 export interface MessageDto {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'helper';
   body: string;
   createdAt?: string;
   replyToMessageId?: string;
+}
+
+export interface RetryableTurnDto {
+  userMessageId: string;
+  interruptedAt: string;
+  reason: 'service_restarted';
 }
 
 export interface SessionDto {
@@ -19,6 +25,7 @@ export interface SessionDto {
   knowledgeHealth?: Record<string, unknown>;
   contextUsage?: { percent?: number; estimatedTokens?: number; limitTokens?: number; level?: string; available?: boolean };
   agentActivity?: Array<{ agentId?: string; agentName?: string; phase?: string; label?: string; summary?: string }>;
+  retryableTurn?: RetryableTurnDto;
 }
 
 export type SessionSummaryDto = Omit<SessionDto, 'messages' | 'runs'> & {
