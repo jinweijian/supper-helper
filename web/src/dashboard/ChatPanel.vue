@@ -5,12 +5,13 @@ import RichAnswer from './RichAnswer.vue';
 import ChatProgressCard from './ChatProgressCard.vue';
 import type { ChatProgressState } from './chat-progress';
 
-const props = defineProps<{ session?: SessionDto; sending: boolean; progress?: ChatProgressState; selectedPersona?: string }>();
-const emit = defineEmits<{ send: [message: string, persona: string]; updatePersona: [persona: string] }>();
+const props = defineProps<{ session?: SessionDto; sending: boolean; progress?: ChatProgressState; error?: string; selectedPersona?: string }>();
+const emit = defineEmits<{ send: [message: string, persona: string]; updatePersona: [persona: string]; retry: [] }>();
 const message = ref('');
 const persona = computed({ get: () => props.selectedPersona || props.session?.userPersona || 'operations', set: (value: string) => emit('updatePersona', value) });
 const chat = ref<HTMLElement>();
 const blockedReason = computed(() => props.session?.archivedAt ? '这个会话已归档，只能阅读，不能继续追问。' : props.session?.contextUsage?.available === false ? '上下文窗口已满，请新建诊断后继续。' : '');
+const inlineError = computed(() => props.progress?.state === 'interrupted' ? '' : props.error || '');
 const statusLabels: Record<string, string> = { queued: '排队中', ready_for_diagnosis: '等待诊断', diagnosing: '诊断中', collecting_input: '新建', need_input: '待补充', partial: '证据不足', concluded: '已有结论' };
 const stagePercent = computed(() => ({ collecting_input: 8, queued: 18, ready_for_diagnosis: 24, diagnosing: 60, need_input: 80, partial: 80, concluded: 100 }[props.session?.status ?? 'collecting_input'] ?? 8));
 
@@ -55,11 +56,12 @@ function onKeydown(event: KeyboardEvent): void {
         <pre v-if="item.role === 'user'">{{ item.body }}</pre>
         <RichAnswer v-else :text="item.body" />
       </article>
-      <ChatProgressCard v-if="progress && ['running', 'interrupted'].includes(progress.state)" :progress="progress" />
+      <ChatProgressCard v-if="progress && ['running', 'interrupted', 'reconnecting'].includes(progress.state)" :progress="progress" @retry="emit('retry')" />
     </section>
     <form class="composer" @submit.prevent="submit">
       <label class="sr-only" for="chat-input">输入问题</label>
       <p v-if="blockedReason" class="warning-banner">{{ blockedReason }}</p>
+      <p v-if="inlineError" class="error-banner" role="alert">{{ inlineError }}</p>
       <textarea id="chat-input" v-model="message" :disabled="sending || !!blockedReason" :placeholder="blockedReason || '描述故障、回答追问，或输入：不清楚'" @keydown="onKeydown" />
       <div class="composer-actions">
         <label>用户视角

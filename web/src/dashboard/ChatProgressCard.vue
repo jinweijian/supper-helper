@@ -2,10 +2,12 @@
 import { computed, onBeforeUnmount, ref } from 'vue';
 import { progressView, type ChatProgressState } from './chat-progress';
 const props = defineProps<{ progress: ChatProgressState }>();
+const emit = defineEmits<{ retry: [] }>();
 const now = ref(Date.now());
 const timer = setInterval(() => { now.value = Date.now(); }, 1_000);
 onBeforeUnmount(() => clearInterval(timer));
 const view = computed(() => progressView(props.progress, now.value));
+const isRetryable = computed(() => props.progress.state === 'interrupted' && props.progress.session?.retryableTurn);
 </script>
 
 <template>
@@ -15,5 +17,6 @@ const view = computed(() => progressView(props.progress, now.value));
     <div class="progress-steps"><span v-for="(step, index) in view.steps" :key="step" :class="{ done: index < view.activeIndex, current: index === view.activeIndex }">{{ step }}</span></div>
     <footer><span>{{ view.elapsedLabel }}</span><span>{{ view.heartbeatLabel }}</span><span>{{ view.estimateLabel }}</span></footer>
     <p v-if="view.stale && view.animated" class="warning-banner">暂时没有新进展，仍在等待服务返回；超过超时阈值会明确停止。</p>
+    <button v-if="isRetryable" type="button" class="retry-button" @click="emit('retry')">一键重试</button>
   </section>
 </template>

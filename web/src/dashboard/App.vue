@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AccessibleDrawer from '../shared/AccessibleDrawer.vue';
 import ChatPanel from './ChatPanel.vue';
 import InsightPanel from './InsightPanel.vue';
@@ -22,6 +22,7 @@ const settingsOpen = ref(false);
 const logsOpener = ref<HTMLElement>();
 const settingsOpener = ref<HTMLElement>();
 const selectedPersona = ref('operations');
+const bannerError = computed(() => sessions.error.value);
 
 onMounted(async () => {
   await sessions.initialize();
@@ -37,9 +38,13 @@ onMounted(async () => {
   }
   window.addEventListener('popstate', onPopState);
 });
-onBeforeUnmount(() => window.removeEventListener('popstate', onPopState));
+onBeforeUnmount(() => {
+  chat.cancel();
+  window.removeEventListener('popstate', onPopState);
+});
 
 async function onPopState(): Promise<void> {
+  chat.cancel();
   await sessions.initialize();
 }
 
@@ -55,7 +60,20 @@ async function send(message: string, persona: string): Promise<void> {
     sessions.current.value = next;
     await sessions.list();
     if (!current) history.replaceState({}, '', `/sessions/${encodeURIComponent(next.id)}`);
-  } catch { /* reactive error banner owns user feedback */ }
+  } catch { /* reactive inline feedback owns user feedback */ }
+}
+
+async function onRetry(): Promise<void> {
+  const current = sessions.current.value;
+  const retryable = chat.progress.value.session?.retryableTurn;
+  if (!current || !retryable) return;
+  try {
+    const settled = await chat.retry(current.id, retryable.userMessageId, (session) => {
+      if (!sessions.current.value || sessions.current.value.id === session.id) sessions.current.value = session;
+    });
+    sessions.current.value = settled;
+    await sessions.list();
+  } catch { /* reactive inline feedback owns user feedback */ }
 }
 
 async function openLogs(event: MouseEvent): Promise<void> {
@@ -80,6 +98,7 @@ function withCurrentKnowledge(action: 'check' | 'bind' | 'reindex'): void {
 }
 
 async function openSession(id: string): Promise<void> {
+  chat.cancel();
   await sessions.open(id);
   const current = sessions.current.value;
   if (current) await knowledge.loadLocalHealth(current.workspaceId || 'current').catch(() => undefined);
@@ -93,7 +112,7 @@ async function openSession(id: string): Promise<void> {
       <span class="lan-notice">可信内网模式 · 暂无鉴权</span>
       <button type="button" @click="openSettings">配置</button>
     </header>
-    <p v-if="sessions.error || chat.error.value" class="global-error" role="alert">{{ sessions.error || chat.error.value }}</p>
+    <p v-if="bannerError" class="global-error" role="alert">{{ bannerError }}</p>
     <div class="workspace-grid">
       <SessionSidebar
         :sessions="sessions.sessions.value"
@@ -103,7 +122,7 @@ async function openSession(id: string): Promise<void> {
         @action="sessions.action"
         @remove="sessions.remove"
       />
-      <ChatPanel :session="sessions.current.value" :sending="chat.sending.value" :progress="chat.progress.value" :selected-persona="selectedPersona" @update-persona="selectedPersona = $event" @send="send">
+      <ChatPanel :session="sessions.current.value" :sending="chat.sending.value" :progress="chat.progress.value" :error="chat.error.value" :selected-persona="selectedPersona" @update-persona="selectedPersona = $event" @send="send" @retry="onRetry">
         <template #actions><button type="button" :disabled="!sessions.current.value" @click="openLogs">日志</button></template>
       </ChatPanel>
       <InsightPanel
