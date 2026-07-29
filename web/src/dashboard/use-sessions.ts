@@ -9,7 +9,7 @@ interface SessionOptions {
 }
 
 export function sessionIdFromPath(path: string): string | undefined {
-  const match = path.match(/^\/sessions\/([^/]+)$/);
+  const match = path.match(/^\/sessions\/([^/]+)(\/audit)?$/);
   return match ? decodeURIComponent(match[1]!) : undefined;
 }
 

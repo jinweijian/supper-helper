@@ -52,7 +52,11 @@ function parseInline(text: string): Inline[] {
 <template>
   <div class="rich-answer">
     <template v-for="(block, index) in blocks" :key="index">
-      <ul v-if="block.kind === 'list'"><li v-for="item in block.items" :key="item">{{ item }}</li></ul>
+      <ul v-if="block.kind === 'list'">
+        <li v-for="item in block.items" :key="item">
+          <template v-for="(token, tokenIndex) in parseInline(item)" :key="tokenIndex"><strong v-if="token.kind === 'strong'">{{ token.text }}</strong><code v-else-if="token.kind === 'code'">{{ token.text }}</code><template v-else>{{ token.text }}</template></template>
+        </li>
+      </ul>
       <pre v-else-if="block.kind === 'code'"><code>{{ block.text }}</code></pre>
       <component :is="block.kind === 'heading' ? 'h3' : 'p'" v-else>
         <template v-for="(token, tokenIndex) in block.inline" :key="tokenIndex"><strong v-if="token.kind === 'strong'">{{ token.text }}</strong><code v-else-if="token.kind === 'code'">{{ token.text }}</code><template v-else>{{ token.text }}</template></template>

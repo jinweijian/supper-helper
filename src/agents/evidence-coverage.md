@@ -9,12 +9,17 @@ may_produce_user_facing_text: false
 
 ## Responsibility
 
-Evidence Coverage Agent 判断知识库 evidence 是否真正覆盖原问题需要的答案要素。它不直接回复用户，不新增事实，只输出覆盖度判断，交给 Evidence Judge 和 Output Review 继续处理。
+Evidence Coverage Agent 对所有答案来源执行独立覆盖审核。producer 的 `answers` 只是候选绑定，不构成覆盖认证。它不直接回复用户、不新增事实，只输出 claim→item binding、完整问题覆盖状态和必须进入 frozen primary 的 claim IDs。
 
 ## Input Contract
 
-- 原问题（未经归一化的原始用户消息）
-- top-N evidence 的 title、summary、answer_span、excerpt
+- runtime 清洗和限界后的完整 `resolvedQuestion`
+- 精确的 `mustAnswerItems`
+- source-neutral `claimSegments`：stable ID、safe text、type、role、candidate item IDs、evidence IDs
+- source-neutral `evidenceSegments`：stable ID、safe text、kind、freshness enum
+
+不得接收 raw `DiagnosticResult`、`Evidence.summary/source`、provider payload、trace、完整
+`retrieval_text`、未选择 evidence、secret 或内部路径。
 
 ## Output Contract
 
@@ -22,19 +27,27 @@ Evidence Coverage Agent 判断知识库 evidence 是否真正覆盖原问题需�
 
 ```json
 {
-  "coverage": "covered" | "partial" | "not_covered",
-  "missing_elements": ["补跑/重跑数据的步骤", "命令行名称或参数"],
-  "reason": "证据只描述了用户数据统计的页面功能，未覆盖补数据步骤或命令行操作"
+  "status": "accepted",
+  "bindings": [
+    {
+      "claimId": "claim_1",
+      "answerItemIds": ["如何开启 X"],
+      "evidenceIds": ["ev_1"]
+    }
+  ],
+  "fullQuestion": "full" | "partial" | "none",
+  "fullQuestionClaimIds": ["claim_1"],
+  "missingElements": [],
+  "reason": "结构化审核理由"
 }
 ```
 
 ## Rules
 
-- 只能判断"证据是否覆盖原问题需要的答案要素"，不能新增事实、不能复述证据内容。
-- `not_covered`：证据只命中功能说明、页面描述或同业务对象，但缺少问题明确需要的操作步骤、命令、入口路径、故障原因或规则条件。
-- `partial`：证据覆盖部分答案要素但缺少关键部分。
-- `covered`：证据直接包含问题所需答案要素。
-- 问题问"如何处理/补/重跑/命令行/操作步骤"时，证据必须包含具体步骤、命令字面量或工具名称，否则 `not_covered`。
-- 问题问"在哪配置/入口/路径"时，证据必须包含具体菜单或导航路径，否则 `not_covered`。
-- 问题问"为什么/原因/失败"时，证据必须包含原因分析或排查依据，否则 `not_covered`。
-- 不得依赖 matched_terms 或字段命中数判断覆盖度，必须基于证据文本内容与问题答案要素的语义匹配。
+- 只能接受 evidence 实际支持的 binding；不能照抄 producer 的 candidate `answers`。
+- `fullQuestion=full` 必须覆盖完整 `resolvedQuestion`，`missingElements` 为空，且
+  `fullQuestionClaimIds` 列出共同构成完整答案、必须可见的 primary claims。
+- 多条 primary claims 可以通过 reviewer-accepted binding 并集覆盖全部 items；不得要求单 claim 全覆盖。
+- sentinel `direct_answer` 只是兼容 item ID，仍须审核完整 `resolvedQuestion`。
+- 只根据输入 safe segments 判断，不使用业务领域关键词表、fixture 特判或隐藏知识。
+- malformed、越界、缺 ID、证据不匹配或不确定时返回 unknown/失败，由 runtime 保守阻断 final。

@@ -130,6 +130,16 @@
       "mayProduceUserFacingText": false,
       "executionMode": "model_assisted",
       "summary": "证据覆盖 Agent，用模型判断知识证据是否真正覆盖原问题需要的答案要素。"
+    },
+    {
+      "id": "visible-prompt-safety",
+      "role": "visible-prompt-safety-review",
+      "stage": "visible_prompt_safety",
+      "configPath": "visible-prompt-safety.md",
+      "required": true,
+      "mayProduceUserFacingText": false,
+      "executionMode": "model_assisted",
+      "summary": "可见追问安全审核 Agent，只按 ID 接受或拒绝已清洗的 unknown/missing-info prompt。"
     }
   ]
 }

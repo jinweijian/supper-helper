@@ -5,18 +5,29 @@ import type { StoredCase } from '../sessions/case-repository.js';
 import { parseAgentModelJson } from './agent-model-review.js';
 import type { ReviewPresentationResult } from './contracts.js';
 import { CaseRuntimeEventRecorder } from './event-recorder.js';
-import {
-  formatReviewFailureFallback,
-  personaName,
-  renderPresentationPlan,
-  ruleBasedReviewAndFormat,
-  type PresentationPlan,
-} from './presenter.js';
+import { formatReviewFailureFallback } from './presenter.js';
 import {
   caseStatusFromDiagnosticResult,
   decisionFromDiagnosticResult,
 } from './review-gate.js';
 import { validateDiagnosticResult } from './result-validator.js';
+import {
+  AnswerCoverageService,
+  materializeCoverageReviewInput,
+  unknownCoverageReview,
+  type CoverageEvidenceProvenance,
+} from './answer-coverage.js';
+import type { AnswerGoal, DiagnosticClaim, Evidence } from '../domain.js';
+import type { ReviewGlobalBlocker } from './review-gate.js';
+import {
+  buildSafeFrozenAnswerProjection,
+  collectVisiblePromptCandidates,
+  renderSafeFrozenAnswer,
+  type SafeFrozenAnswerProjection,
+  type SafePresentationPlan,
+  type VisiblePromptReview,
+} from './safe-answer-projection.js';
+import { VisiblePromptSafetyService } from './visible-prompt-safety.js';
 
 export class ReviewPresentationService {
   constructor(
@@ -26,6 +37,8 @@ export class ReviewPresentationService {
     private readonly mainAgentSpec: string,
     private readonly outputReviewAgentSpec: string,
     private readonly presentationAgentSpec: string,
+    private readonly answerCoverageAgentSpec?: string,
+    private readonly visiblePromptSafetyAgentSpec?: string,
   ) {}
 
   async reviewAndFormat(
@@ -34,8 +47,37 @@ export class ReviewPresentationService {
     run: DiagnosticRun,
   ): Promise<ReviewPresentationResult> {
     this.events.evidenceReviewStarted(caseSession, run, result);
-    const validation = validateDiagnosticResult(result, run.request?.answerGoal);
-    const validated = validation.result;
+    const answerGoal = run.request?.answerGoal;
+    const structural = validateDiagnosticResult(result, answerGoal);
+    const validation = this.answerCoverageAgentSpec && answerGoal
+      ? validateDiagnosticResult(
+          result,
+          answerGoal,
+          await this.reviewCoverage(structural.result.claims, structural.result.evidence, answerGoal, run),
+          { blockers: upstreamGlobalBlockers(run) },
+        )
+      : structural;
+    let validated = validation.result;
+    const promptCandidates = collectVisiblePromptCandidates({
+      result: validated,
+      acceptedClaimIds: validation.acceptedClaimIds,
+    });
+    const visiblePromptReview = await this.reviewVisiblePrompts(promptCandidates);
+    let projection = buildSafeFrozenAnswerProjection({
+      result: validated,
+      answerGoal: answerGoal ?? fallbackAnswerGoal(validated),
+      frozenPrimaryClaimIds: validation.acceptedPrimaryAnswerClaimIds,
+      acceptedClaimIds: validation.acceptedClaimIds,
+      visiblePromptReview,
+    });
+    validated = applyProjectionOutcome(validated, projection);
+    projection = buildSafeFrozenAnswerProjection({
+      result: validated,
+      answerGoal: answerGoal ?? fallbackAnswerGoal(validated),
+      frozenPrimaryClaimIds: validation.acceptedPrimaryAnswerClaimIds,
+      acceptedClaimIds: validation.acceptedClaimIds,
+      visiblePromptReview,
+    });
     run.result = validated;
     run.status = validated.status;
     const caseStatus = caseStatusFromDiagnosticResult(validated);
@@ -59,7 +101,7 @@ export class ReviewPresentationService {
 
     if (this.config.agent.modelProvider) {
       try {
-        const reply = await this.modelDrivenPresentation(caseSession, validated, validation.acceptedClaimIds, validation.acceptedPrimaryAnswerClaimIds, run);
+        const reply = await this.modelDrivenPresentation(caseSession, projection);
         if (reply) {
           return {
             reply,
@@ -74,21 +116,47 @@ export class ReviewPresentationService {
     }
 
     return {
-      reply: ruleBasedReviewAndFormat(validated, caseSession.userPersona, run.request?.userGoal, {
-        answerGoal: run.request?.answerGoal,
-        ragAnswerability: run.request?.context?.knowledge?.answerability,
-      }),
+      reply: renderSafeFrozenAnswer({ projection, persona: caseSession.userPersona }),
       decision: frozenDecision,
       caseStatus,
     };
   }
 
+  private async reviewVisiblePrompts(
+    candidates: ReturnType<typeof collectVisiblePromptCandidates>,
+  ): Promise<VisiblePromptReview> {
+    if (!this.visiblePromptSafetyAgentSpec) {
+      return { status: 'accepted', acceptedIds: candidates.map((item) => item.id) };
+    }
+    return new VisiblePromptSafetyService(
+      this.model,
+      this.visiblePromptSafetyAgentSpec,
+    ).review(candidates);
+  }
+
+  private async reviewCoverage(
+    claims: DiagnosticClaim[],
+    evidence: Evidence[],
+    answerGoal: AnswerGoal,
+    run: DiagnosticRun,
+  ) {
+    try {
+      const reviewInput = materializeCoverageReviewInput({
+        answerGoal,
+        claims,
+        evidence,
+        provenance: currentEvidenceProvenance(claims, evidence, answerGoal),
+      });
+      return await new AnswerCoverageService(this.model, this.answerCoverageAgentSpec ?? '').review(reviewInput);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return unknownCoverageReview(`answer coverage unavailable: ${reason}`);
+    }
+  }
+
   private async modelDrivenPresentation(
     caseSession: StoredCase,
-    result: DiagnosticResult,
-    acceptedClaimIds: string[],
-    acceptedPrimaryAnswerClaimIds: string[],
-    run: DiagnosticRun,
+    projection: SafeFrozenAnswerProjection,
   ): Promise<string | undefined> {
     const response = await this.model.complete([
       {
@@ -100,17 +168,16 @@ ${this.outputReviewAgentSpec}
 ${this.presentationAgentSpec}
 
 你只负责选择已通过确定性审核的 claim/evidence ID 并规划展示顺序，runtime 会确定性渲染用户可见回复。你不得返回自由回复文本（reply 字段）或新增事实。
-当前用户视角：${personaName(caseSession.userPersona)}。
+当前用户视角：${caseSession.userPersona}。
 
 只返回 JSON：
-{"answerTarget":"用户真实问题","claimIds":["claim_1"],"evidenceIds":["ev_1"],"directAnswerClaimIds":["claim_1"],"sections":[{"title":"结论","claimIds":["claim_1"]}]}
+{"claimIds":["claim_1"],"evidenceIds":["ev_1"],"directAnswerClaimIds":["claim_1"],"actionClaimIds":["action_1"]}
 
 约束：
-- answerTarget 必须来自 answerGoal.resolvedQuestion，不得使用 diagnosticObjective 替代用户问题。
-- directAnswerClaimIds 必须等于 frozenPrimaryAnswerClaimIds；如果为空，说明本轮没有最终主答，只能表达初步判断。
-- claimIds 必须非空，且只能选择 acceptedClaims 中存在的 ID。不得选择 role 为 process_note 的 claim。
-- evidenceIds 必须覆盖所选 claimIds 引用的全部 evidence。
-- sections 可选，用于规划展示顺序；每个 section 的 claimIds 必须是 claimIds 的子集。runtime 只渲染被选 claim 原文、accepted next action、missingInfo 与固定连接语。
+- 只能排序 projection 中的 safe IDs，不得返回 answerTarget、自由文本或新事实。
+- directAnswerClaimIds 必须等于 projection.primary IDs。
+- actionClaimIds 必须等于 projection.actions IDs。
+- claimIds 必须包含全部 required claim IDs；evidenceIds 必须包含全部 required evidence IDs。
 - 不得通过中文问法列表、问题类型枚举或过程目标选择主答。
 - 不要把“系统 bug / 设计使然 / 配置或使用问题 / 目前不能确认”这类归类放在结论第一句，除非它本身就是 frozen primary answer。
 - 非开发视角不得暴露 src/、knowledge/_sources、caseId/runId、worker command、raw stdout/stderr、内部 prompt、Evidence Judge 分数或路由分数。
@@ -118,107 +185,64 @@ ${this.presentationAgentSpec}
       },
       {
         role: 'user',
-        content: JSON.stringify({
-          caseId: caseSession.id,
-          workspaceId: caseSession.workspaceId,
-          frozenDecision: decisionFromDiagnosticResult(result),
-          answerGoal: run.request?.answerGoal,
-          ragAnswerability: run.request?.context?.knowledge?.answerability,
-          frozenPrimaryAnswerClaimIds: acceptedPrimaryAnswerClaimIds,
-          acceptedClaims: result.claims.map((claim) => ({ id: claim.id, type: claim.type, role: claim.role, text: claim.text, evidenceIds: claim.evidenceIds, answers: claim.answers })),
-          acceptedEvidence: result.evidence.map((evidence) => ({ id: evidence.id, kind: evidence.kind, source: evidence.source, summary: evidence.summary, confidence: evidence.confidence })),
-        }),
+        content: JSON.stringify({ projection }),
       },
     ], { json: true });
-    const parsed = parseAgentModelJson<ModelPresentationParsed>(response);
-    const validated = validateModelPresentation({
-      parsed,
-      result,
-      acceptedClaimIds,
-      acceptedPrimaryAnswerClaimIds,
-    });
+    const parsed = parseAgentModelJson<SafePresentationPlan>(response);
     this.events.modelReviewResult(caseSession, {
-      accepted: Boolean(validated),
-      answerTarget: typeof parsed.answerTarget === 'string' ? parsed.answerTarget.slice(0, 300) : undefined,
-      claimIds: validated?.plan.claimIds ?? safeStringArray(parsed.claimIds),
-      evidenceIds: validated?.plan.evidenceIds ?? safeStringArray(parsed.evidenceIds),
-      directAnswerClaimIds: validated?.plan.directAnswerClaimIds ?? safeStringArray(parsed.directAnswerClaimIds),
+      accepted: true,
+      claimIds: safeStringArray(parsed.claimIds),
+      evidenceIds: safeStringArray(parsed.evidenceIds),
+      directAnswerClaimIds: safeStringArray(parsed.directAnswerClaimIds),
     });
-    if (!validated) return undefined;
-    return renderPresentationPlan({ plan: validated.plan, result, persona: caseSession.userPersona });
+    return renderSafeFrozenAnswer({
+      projection,
+      persona: caseSession.userPersona,
+      plan: parsed,
+    });
   }
 }
 
-interface ModelPresentationParsed {
-  answerTarget?: unknown;
-  claimIds?: unknown;
-  evidenceIds?: unknown;
-  directAnswerClaimIds?: unknown;
-  sections?: unknown;
+function currentEvidenceProvenance(
+  claims: DiagnosticClaim[],
+  evidence: Evidence[],
+  answerGoal: AnswerGoal,
+): Record<string, CoverageEvidenceProvenance | undefined> {
+  return Object.fromEntries(evidence.map((item) => {
+    const safeText = claims
+      .filter((claim) => claim.evidenceIds.includes(item.id))
+      .map((claim) => claim.text)
+      .join('\n')
+      .trim();
+    if (!safeText) return [item.id, undefined];
+    if (item.kind === 'workspace' || item.kind === 'mcp' || item.kind === 'log') {
+      return [item.id, { freshness: 'same_run', safeText }];
+    }
+    if (
+      item.kind === 'manual' &&
+      answerGoal.sourceMessageIds.includes(item.source)
+    ) {
+      return [item.id, { freshness: 'current_message', safeText }];
+    }
+    // Knowledge v4 freshness is supplied only after Gate C generation validation.
+    return [item.id, undefined];
+  }));
 }
 
-function validateModelPresentation(input: {
-  parsed: ModelPresentationParsed;
-  result: DiagnosticResult;
-  acceptedClaimIds: string[];
-  acceptedPrimaryAnswerClaimIds: string[];
-}): { plan: PresentationPlan; } | undefined {
-  const { parsed, result, acceptedClaimIds, acceptedPrimaryAnswerClaimIds } = input;
-  if (!Array.isArray(parsed.claimIds) || !Array.isArray(parsed.evidenceIds)) {
-    return undefined;
+function upstreamGlobalBlockers(run: DiagnosticRun): ReviewGlobalBlocker[] {
+  const judge = run.request?.context?.knowledge?.judge as {
+    blockers?: string[];
+    conflicts?: string[];
+  } | undefined;
+  const blockers = [...(judge?.blockers ?? [])];
+  if ((judge?.conflicts?.length ?? 0) > 0 && !blockers.includes('conflicting_knowledge')) {
+    blockers.push('conflicting_knowledge');
   }
-  if (!parsed.claimIds.every((id): id is string => typeof id === 'string')) {
-    return undefined;
-  }
-  if (!parsed.evidenceIds.every((id): id is string => typeof id === 'string')) {
-    return undefined;
-  }
-  if (Array.isArray(parsed.directAnswerClaimIds) && !parsed.directAnswerClaimIds.every((id): id is string => typeof id === 'string')) {
-    return undefined;
-  }
-
-  const claimIds = Array.from(new Set(parsed.claimIds));
-  const evidenceIds = Array.from(new Set(parsed.evidenceIds));
-  const directAnswerClaimIds = Array.isArray(parsed.directAnswerClaimIds)
-    ? Array.from(new Set(parsed.directAnswerClaimIds))
-    : [];
-  const acceptedClaimIdSet = new Set(acceptedClaimIds);
-  const evidenceById = new Map(result.evidence.map((evidence) => [evidence.id, evidence]));
-  if (claimIds.length === 0 || claimIds.some((id) => !acceptedClaimIdSet.has(id))) {
-    return undefined;
-  }
-  if (evidenceIds.length === 0 || evidenceIds.some((id) => !evidenceById.has(id))) {
-    return undefined;
-  }
-
-  const claimsById = new Map(result.claims.map((claim) => [claim.id!, claim]));
-  const selectedClaims = claimIds.map((id) => claimsById.get(id)).filter(Boolean);
-  if (selectedClaims.length !== claimIds.length) {
-    return undefined;
-  }
-  const selectedEvidenceIds = new Set(evidenceIds);
-  const requiredEvidenceIds = new Set(selectedClaims.flatMap((claim) => claim!.evidenceIds));
-  if ([...requiredEvidenceIds].some((id) => !selectedEvidenceIds.has(id))) {
-    return undefined;
-  }
-
-  if (claimIds.some((id) => claimsById.get(id)?.role === 'process_note')) {
-    return undefined;
-  }
-
-  const selectedClaimIds = new Set(claimIds);
-  const selectedPrimaryIds = claimIds.filter((id) => acceptedPrimaryAnswerClaimIds.includes(id));
-  if (acceptedPrimaryAnswerClaimIds.length > 0 && selectedPrimaryIds.length !== acceptedPrimaryAnswerClaimIds.length) {
-    return undefined;
-  }
-  if (acceptedPrimaryAnswerClaimIds.length > 0 && !sameStringSet(directAnswerClaimIds, acceptedPrimaryAnswerClaimIds)) {
-    return undefined;
-  }
-  if (directAnswerClaimIds.some((id) => !selectedClaimIds.has(id))) {
-    return undefined;
-  }
-
-  return { plan: { claimIds, evidenceIds, directAnswerClaimIds } };
+  return blockers.flatMap((code): ReviewGlobalBlocker[] => {
+    if (code === 'conflicting_knowledge') return [{ code: 'evidence_conflict' }];
+    if (code === 'high_risk_uncertainty') return [{ code: 'identity_or_safety_blocker' }];
+    return [];
+  });
 }
 
 function safeStringArray(value: unknown): string[] {
@@ -226,12 +250,6 @@ function safeStringArray(value: unknown): string[] {
     return [];
   }
   return Array.from(new Set(value.filter((item): item is string => typeof item === 'string'))).slice(0, 20);
-}
-
-function sameStringSet(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) return false;
-  const rightSet = new Set(right);
-  return left.every((item) => rightSet.has(item));
 }
 
 function workerFailedBeforeUsableResult(run: DiagnosticRun): boolean {
@@ -247,4 +265,29 @@ function workerFailedBeforeUsableResult(run: DiagnosticRun): boolean {
   return !run.result?.evidence.some((evidence) => (
     evidence.kind !== 'log' && evidence.confidence !== 'low'
   ));
+}
+
+function applyProjectionOutcome(
+  result: DiagnosticResult,
+  projection: SafeFrozenAnswerProjection,
+): DiagnosticResult {
+  if (projection.outcome === 'final') return result;
+  if (projection.outcome === 'ask_user') {
+    return { ...result, status: 'need_input', recommendedNextAction: 'ask_user' };
+  }
+  if (projection.outcome === 'escalate') {
+    return { ...result, status: 'partial', recommendedNextAction: 'escalate_to_human' };
+  }
+  return { ...result, status: 'partial', recommendedNextAction: 'continue_diagnosis' };
+}
+
+function fallbackAnswerGoal(result: DiagnosticResult): AnswerGoal {
+  return {
+    rawUserQuestion: '',
+    resolvedQuestion: '当前问题',
+    answerObject: '当前问题',
+    mustAnswerItems: ['direct_answer'],
+    diagnosticObjective: '',
+    sourceMessageIds: [],
+  };
 }

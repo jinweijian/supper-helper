@@ -92,6 +92,9 @@ export function createReviewEvents(sink: EventRecorderSink) {
         issues: validation.issues,
         acceptedClaimIds: validation.acceptedClaimIds,
         rejectedClaimIds: validation.rejectedClaimIds,
+        acceptedPrimaryAnswerClaimIds: validation.acceptedPrimaryAnswerClaimIds,
+        globalBlockerCodes: validation.globalBlockers.map((item) => item.code),
+        outcomeReasonCode: validation.outcomeReasonCode,
       },
     });
   },

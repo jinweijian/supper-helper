@@ -13,12 +13,24 @@ const chat = ref<HTMLElement>();
 const blockedReason = computed(() => props.session?.archivedAt ? '这个会话已归档，只能阅读，不能继续追问。' : props.session?.contextUsage?.available === false ? '上下文窗口已满，请新建诊断后继续。' : '');
 const inlineError = computed(() => props.progress?.state === 'interrupted' ? '' : props.error || '');
 const statusLabels: Record<string, string> = { queued: '排队中', ready_for_diagnosis: '等待诊断', diagnosing: '诊断中', collecting_input: '新建', need_input: '待补充', partial: '证据不足', concluded: '已有结论' };
-const stagePercent = computed(() => ({ collecting_input: 8, queued: 18, ready_for_diagnosis: 24, diagnosing: 60, need_input: 80, partial: 80, concluded: 100 }[props.session?.status ?? 'collecting_input'] ?? 8));
+const isEmpty = computed(() => !props.session?.messages.length);
 
 watch(() => props.session?.messages.length, async () => {
   await nextTick();
   chat.value?.lastElementChild?.scrollIntoView({ block: 'end' });
 });
+
+function relativeTime(iso?: string): string {
+  if (!iso) return '';
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 5) return '几秒前';
+  if (seconds < 60) return `${seconds} 秒前`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  return `${Math.floor(hours / 24)} 天前`;
+}
 
 function submit(): void {
   const body = message.value.trim();
@@ -36,23 +48,21 @@ function onKeydown(event: KeyboardEvent): void {
 </script>
 
 <template>
-  <main class="chat-column">
+  <main class="chat-column" :class="{ 'is-empty': isEmpty }">
     <header class="case-header">
       <div>
         <h1>{{ session?.title || '新对话' }}</h1>
         <p>{{ session ? `${session.workspaceId || 'current'} · ${statusLabels[session.status] || session.status}` : '选择一个会话，或新建诊断' }}</p>
-        <div v-if="session" class="case-step-rail"><span v-for="(step, index) in ['理解问题', '知识路由', '检索证据', '证据判断', '生成答复']" :key="step" :class="{ done: stagePercent >= (index + 1) * 20, current: stagePercent < (index + 1) * 20 && stagePercent >= index * 20 }">{{ step }}</span></div>
-        <div v-if="session?.contextUsage" class="context-meter"><span class="progress-track"><span :style="{ width: `${Math.min(100, session.contextUsage.percent || 0)}%` }" /></span><small>上下文：约 {{ session.contextUsage.estimatedTokens || 0 }} / {{ session.contextUsage.limitTokens || 0 }} tokens（{{ session.contextUsage.percent || 0 }}%）</small></div>
       </div>
-      <slot name="actions" />
+      <div class="case-header-actions"><slot name="actions" /></div>
     </header>
     <section ref="chat" class="chat" aria-live="polite">
-      <div v-if="!session?.messages.length" class="empty-state">
-        <h2>描述你遇到的问题</h2>
+      <div v-if="isEmpty" class="empty-state">
+        <h2><span class="empty-logo" aria-hidden="true">H</span>描述你遇到的问题</h2>
         <p>helper agent 会先审核上下文，再决定追问或执行只读排查。</p>
       </div>
       <article v-for="item in session?.messages || []" :key="item.id" class="message" :class="item.role">
-        <span>{{ item.role === 'user' ? '你' : 'helper' }}</span>
+        <header><strong>{{ item.role === 'user' ? '你' : 'helper' }}</strong><time v-if="item.createdAt">{{ relativeTime(item.createdAt) }}</time></header>
         <pre v-if="item.role === 'user'">{{ item.body }}</pre>
         <RichAnswer v-else :text="item.body" />
       </article>
@@ -60,8 +70,8 @@ function onKeydown(event: KeyboardEvent): void {
     </section>
     <form class="composer" @submit.prevent="submit">
       <label class="sr-only" for="chat-input">输入问题</label>
-      <p v-if="blockedReason" class="warning-banner">{{ blockedReason }}</p>
       <p v-if="inlineError" class="error-banner" role="alert">{{ inlineError }}</p>
+      <p v-if="blockedReason" class="warning-banner">{{ blockedReason }}</p>
       <textarea id="chat-input" v-model="message" :disabled="sending || !!blockedReason" :placeholder="blockedReason || '描述故障、回答追问，或输入：不清楚'" @keydown="onKeydown" />
       <div class="composer-actions">
         <label>用户视角

@@ -19,17 +19,18 @@ export function progressView(state: ChatProgressState, now = Date.now()) {
   if (/judge|review|diagnostic|code_escalation/.test(phase) || (!phase && state.session?.status === 'diagnosing')) { index = 3; title = '正在判断证据并排查'; }
   if (/presentation|user_reply/.test(phase)) { index = 4; title = '正在整理回答'; }
   const interrupted = state.state === 'interrupted';
+  const reconnecting = state.state === 'reconnecting';
   const elapsed = Math.max(0, now - (state.startedAt ?? now));
   const heartbeat = Math.max(0, now - (state.lastActivityAt ?? state.startedAt ?? now));
   return {
-    title: interrupted ? '回答已中断' : title,
-    summary: interrupted ? (state.error || '诊断没有返回回答，请重试或查看日志。') : (state.session?.agentActivity?.[0]?.summary || '正在处理，本页面会持续更新真实进展。'),
+    title: interrupted ? '回答已中断' : reconnecting ? '正在重新连接' : title,
+    summary: interrupted ? (state.error || '诊断没有返回回答，请重试或查看日志。') : reconnecting ? '网络连接中断，正在重试…' : (state.session?.agentActivity?.[0]?.summary || '正在处理，本页面会持续更新真实进展。'),
     percent: interrupted ? Math.min(92, 18 + index * 18) : Math.min(92, 18 + index * 18),
     steps, activeIndex: index,
     elapsedLabel: `已耗时 ${formatDuration(elapsed)}`,
     heartbeatLabel: `${Math.floor(heartbeat / 1000)} 秒前有活动`,
     estimateLabel: index >= 3 ? '估计还需 1–3 分钟（非精确时间）' : '估计还需 2–5 分钟（非精确时间）',
-    animated: state.state === 'running',
+    animated: state.state === 'running' || state.state === 'reconnecting',
     stale: heartbeat > 30_000,
   };
 }

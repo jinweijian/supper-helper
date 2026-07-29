@@ -142,5 +142,5 @@ async function route(
 }
 
 function isAppShellRoute(pathname: string): boolean {
-  return pathname === '/' || /^\/sessions\/[^/]+$/.test(pathname);
+  return pathname === '/' || /^\/sessions\/[^/]+(\/audit)?$/.test(pathname);
 }

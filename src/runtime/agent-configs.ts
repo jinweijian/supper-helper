@@ -11,6 +11,7 @@ export type AgentStage =
   | 'evidence_judge'
   | 'rag_answerability'
   | 'evidence_coverage'
+  | 'visible_prompt_safety'
   | 'case_curator'
   | 'output_review'
   | 'presentation';

@@ -36,26 +36,22 @@ export function renderPresentationPlan(input: {
   const unknownClaims = selectedClaims.filter((claim) => claim.type === 'unknown');
 
   const lines: string[] = [];
-  const conclusionText = primaryClaims.length > 0
-    ? primaryClaims.map((claim) => claim.text).join('；')
-    : supportingClaims.length > 0
-      ? supportingClaims.map((claim) => claim.text).join('；')
-      : '当前没有通过审核的事实结论。';
+  const conclusionClaims = primaryClaims.length > 0 ? primaryClaims : supportingClaims;
 
   const isPartial = result.recommendedNextAction !== 'final_answer' || result.status !== 'concluded' || primaryClaims.length === 0;
   const conclusionLabel = isPartial ? '初步判断' : '结论';
-  lines.push(`**${conclusionLabel}：${sanitizeForPersona(conclusionText, persona)}**`);
+  lines.push(...renderLabeledClaims(`**${conclusionLabel}：**`, conclusionClaims.map((claim) => sanitizeForPersona(claim.text, persona)), '当前没有通过审核的事实结论。'));
 
   if (supportingClaims.length > 0 && primaryClaims.length > 0) {
-    lines.push('', `**定位依据：** ${supportingClaims.map((claim) => sanitizeForPersona(claim.text, persona)).join('；')}`);
+    lines.push('', ...renderLabeledClaims('**定位依据：**', supportingClaims.map((claim) => sanitizeForPersona(claim.text, persona)), ''));
   }
 
   if (nextActionClaims.length > 0) {
-    lines.push('', `**下一步：** ${nextActionClaims.map((claim) => claim.text).join('；')}`);
+    lines.push('', ...renderLabeledClaims('**下一步：**', nextActionClaims.map((claim) => claim.text), ''));
   }
 
   if (unknownClaims.length > 0) {
-    lines.push('', `**未知项：** ${unknownClaims.map((claim) => claim.text).join('；')}`);
+    lines.push('', ...renderLabeledClaims('**未知项：**', unknownClaims.map((claim) => claim.text), ''));
   }
 
   if (result.missingInfo.length > 0) {
@@ -63,6 +59,13 @@ export function renderPresentationPlan(input: {
   }
 
   return lines.join('\n');
+}
+
+function renderLabeledClaims(label: string, texts: string[], emptyText: string): string[] {
+  const items = texts.filter(Boolean);
+  if (items.length === 0) return emptyText ? [`${label} ${emptyText}`] : [];
+  if (items.length === 1) return [`${label} ${items[0]}`];
+  return [label, ...items.map((text) => `- ${text}`)];
 }
 
 function sanitizeForPersona(text: string, persona: UserPersona): string {
@@ -81,7 +84,7 @@ export function ruleBasedReviewAndFormat(
   result = validateDiagnosticResult(result, context?.answerGoal).result;
   const unsupportedFacts = result.claims.filter((claim) => claim.type === 'fact' && claim.evidenceIds.length === 0);
   const supportedClaims = result.claims.filter((claim) => claim.type !== 'fact' || claim.evidenceIds.length > 0);
-  const primaryClaim = selectGroundedPrimaryClaim(supportedClaims);
+  const primaryClaims = selectGroundedPrimaryClaims(supportedClaims);
   if (unsupportedFacts.length > 0 && supportedClaims.length === 0) {
     return '目前证据不足，暂不能形成结论。\n\n**仍需确认：** 缺少可验证的 medium/high confidence 证据。\n\n**下一步：** 请补充更多可验证信息，或查看诊断日志让技术支持复核。';
   }
@@ -91,7 +94,7 @@ export function ruleBasedReviewAndFormat(
     if (result.status !== 'need_input' && (result.evidence.length > 0 || supportedClaims.length > 0)) {
       return formatPersonaReply({
         persona,
-        conclusion: primaryClaim ?? '现有证据仍不足以形成事实结论',
+        conclusions: primaryClaims.length > 0 ? primaryClaims : ['现有证据仍不足以形成事实结论'],
         result,
         mode: 'partial',
         missing,
@@ -99,18 +102,18 @@ export function ruleBasedReviewAndFormat(
     }
     return formatPersonaReply({
       persona,
-      conclusion: '目前证据不足，还不能最终定位',
+      conclusions: ['目前证据不足，还不能最终定位'],
       result,
       mode: 'need_input',
       missing,
     });
   }
 
-  const groundedConclusion = primaryClaim ?? '当前没有通过审核的事实结论';
+  const groundedConclusions = primaryClaims.length > 0 ? primaryClaims : ['当前没有通过审核的事实结论'];
   const mode = isFinalReviewedAnswer(result, supportedClaims) ? 'final' : 'partial';
   return formatPersonaReply({
     persona,
-    conclusion: groundedConclusion,
+    conclusions: groundedConclusions,
     result,
     mode,
     missing: result.missingInfo.join('、'),
@@ -129,7 +132,7 @@ function isPrimaryAnswerClaim(claim: DiagnosticClaim): boolean {
   return claim.role === 'primary_answer' && Array.isArray(claim.answers) && claim.answers.length > 0;
 }
 
-function selectGroundedPrimaryClaim(supportedClaims: DiagnosticClaim[]): string | undefined {
+function selectGroundedPrimaryClaims(supportedClaims: DiagnosticClaim[]): string[] {
   const eligible = supportedClaims.filter((claim) => claim.role !== 'process_note');
   const primaryClaims = eligible
     .filter(isPrimaryAnswerClaim)
@@ -140,9 +143,10 @@ function selectGroundedPrimaryClaim(supportedClaims: DiagnosticClaim[]): string 
       .filter((claim) => !isPrimaryAnswerClaim(claim) && (claim.type === 'fact' || claim.type === 'inference'))
       .map((claim) => claim.text)
       .filter(Boolean);
-    return [...primaryClaims, ...supportingClaims].join('；');
+    return [...primaryClaims, ...supportingClaims];
   }
-  return eligible.find((claim) => claim.type === 'fact' || claim.type === 'inference')?.text;
+  const fallback = eligible.find((claim) => claim.type === 'fact' || claim.type === 'inference')?.text;
+  return fallback ? [fallback] : [];
 }
 
 export function formatReviewFailureFallback(
@@ -200,41 +204,44 @@ type ReplyMode = 'final' | 'partial' | 'need_input';
 
 function formatPersonaReply(input: {
   persona: UserPersona;
-  conclusion: string;
+  conclusions: string[];
   result: DiagnosticResult;
   mode: ReplyMode;
   missing?: string;
   unsupportedFacts?: DiagnosticClaim[];
 }): string {
   const missing = missingForMode(input.result, input.missing, input.mode);
-  const conclusion = stripPreliminaryPrefix(input.conclusion);
+  const conclusions = input.conclusions.map((text) => stripPreliminaryPrefix(text));
   switch (input.persona) {
     case 'developer':
-      return developerReply(conclusion, input.result, input.mode, missing, input.unsupportedFacts ?? []);
+      return developerReply(conclusions, input.result, input.mode, missing, input.unsupportedFacts ?? []);
     case 'support':
-      return supportReply(conclusion, input.result, input.mode, missing, input.unsupportedFacts ?? []);
+      return supportReply(conclusions, input.result, input.mode, missing, input.unsupportedFacts ?? []);
     case 'customer':
-      return customerReply(conclusion, input.result, input.mode, missing);
+      return customerReply(conclusions, input.result, input.mode, missing);
     case 'operations':
     default:
-      return operationsReply(conclusion, input.result, input.mode, missing, input.unsupportedFacts ?? []);
+      return operationsReply(conclusions, input.result, input.mode, missing, input.unsupportedFacts ?? []);
   }
 }
 
+function conclusionLines(label: string, items: string[]): string[] {
+  const texts = items.filter(Boolean);
+  if (texts.length === 0) return [];
+  if (texts.length === 1) return [`${label} ${texts[0]}`];
+  return [label, ...texts.map((text) => `- ${text}`)];
+}
+
 function operationsReply(
-  conclusion: string,
+  conclusions: string[],
   result: DiagnosticResult,
   mode: ReplyMode,
   missing: string,
   unsupportedFacts: DiagnosticClaim[],
 ): string {
-  const safeConclusion = redactInternalKnowledgePath(conclusion);
-  const category = mode === 'need_input' ? '目前不能确认' : operationsCategory(safeConclusion, result);
-  const lines = mode === 'partial' ? [
-    `**初步判断：${safeConclusion}**`,
-  ] : [
-    `**结论：${safeConclusion}**`,
-  ];
+  const safeConclusions = conclusions.map(redactInternalKnowledgePath);
+  const category = mode === 'need_input' ? '目前不能确认' : operationsCategory(safeConclusions.join('；'), result);
+  const lines = conclusionLines(`**${mode === 'partial' ? '初步判断' : '结论'}：**`, safeConclusions);
   appendEvidenceStatus(lines, mode);
   if (mode !== 'final') {
     lines.push(
@@ -252,7 +259,7 @@ function operationsReply(
 }
 
 function developerReply(
-  conclusion: string,
+  conclusions: string[],
   result: DiagnosticResult,
   mode: ReplyMode,
   missing: string,
@@ -261,9 +268,7 @@ function developerReply(
   const evidence = result.evidence[0];
   const source = evidence?.source ? `先查 ${redactInternalKnowledgePath(evidence.source)}` : '先查与问题直接相关的入口、接口、日志或配置';
   const basis = evidence?.summary ?? result.summary;
-  const lines = [
-    `**${mode === 'partial' ? '初步判断' : '结论'}：${conclusion}**`,
-  ];
+  const lines = conclusionLines(`**${mode === 'partial' ? '初步判断' : '结论'}：**`, conclusions);
   appendEvidenceStatus(lines, mode);
   lines.push('', `**定位依据：** ${basis || '当前还没有足够证据形成定位依据。'}`);
   if (mode !== 'final') {
@@ -281,15 +286,13 @@ function developerReply(
 }
 
 function supportReply(
-  conclusion: string,
+  conclusions: string[],
   result: DiagnosticResult,
   mode: ReplyMode,
   missing: string,
   unsupportedFacts: DiagnosticClaim[],
 ): string {
-  const lines = [
-    `**${mode === 'partial' ? '初步判断' : '结论'}：${conclusion}**`,
-  ];
+  const lines = conclusionLines(`**${mode === 'partial' ? '初步判断' : '结论'}：**`, conclusions);
   appendEvidenceStatus(lines, mode);
   lines.push(
     '',
@@ -304,16 +307,14 @@ function supportReply(
 }
 
 function customerReply(
-  conclusion: string,
+  conclusions: string[],
   result: DiagnosticResult,
   mode: ReplyMode,
   missing: string,
 ): string {
-  const safeConclusion = customerSafeConclusion(`${conclusion}\n${result.summary}`);
-  const actions = customerActionItems(safeConclusion, mode);
-  const lines = [
-    `**${mode === 'partial' ? '初步判断' : '结论'}：${safeConclusion}**`,
-  ];
+  const safeConclusions = conclusions.map((text) => customerSafeConclusion(`${text}\n${result.summary}`));
+  const actions = customerActionItems(safeConclusions.join('；'), mode);
+  const lines = conclusionLines(`**${mode === 'partial' ? '初步判断' : '结论'}：**`, safeConclusions);
   appendEvidenceStatus(lines, mode);
   lines.push(
     '',

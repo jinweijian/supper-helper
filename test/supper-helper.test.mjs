@@ -155,7 +155,7 @@ test('partial fallback leads with accepted inference instead of generic downgrad
     recommendedNextAction: 'final_answer',
   }, 'operations', '学员pc端手机号快捷登录收不到验证码，这个是什么问题');
 
-  assert.match(reply, /^\*\*初步判断：短信防御模块可能拦截了该学员的请求/m);
+  assert.match(reply, /^\*\*初步判断：\*\* 短信防御模块可能拦截了该学员的请求/m);
   assert.doesNotMatch(reply, /^(\*\*)?结论：诊断结果包含未通过证据校验的内容/m);
   assert.match(reply, /\*\*证据状态：当前证据不足，不能作为最终结论。\*\*/);
   assert.match(reply, /\*\*仍需确认：.*短信防御命中日志.*可验证的 medium\/high confidence 证据/);

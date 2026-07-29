@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AccessibleDrawer from '../shared/AccessibleDrawer.vue';
+import AuditPage from './AuditPage.vue';
 import ChatPanel from './ChatPanel.vue';
-import InsightPanel from './InsightPanel.vue';
 import SessionSidebar from './SessionSidebar.vue';
 import SettingsForm from './SettingsForm.vue';
 import LogList from './LogList.vue';
@@ -22,6 +22,7 @@ const settingsOpen = ref(false);
 const logsOpener = ref<HTMLElement>();
 const settingsOpener = ref<HTMLElement>();
 const selectedPersona = ref('operations');
+const auditMode = ref(/\/audit$/.test(location.pathname));
 const bannerError = computed(() => sessions.error.value);
 let disposed = false;
 
@@ -52,7 +53,21 @@ onBeforeUnmount(() => {
 async function onPopState(): Promise<void> {
   if (disposed) return;
   chat.cancel();
+  auditMode.value = /\/audit$/.test(location.pathname);
   await sessions.initialize();
+}
+
+function openAudit(): void {
+  const id = sessions.current.value?.id;
+  if (!id) return;
+  history.pushState({}, '', `/sessions/${encodeURIComponent(id)}/audit`);
+  auditMode.value = true;
+}
+
+function closeAudit(): void {
+  const id = sessions.current.value?.id;
+  history.pushState({}, '', id ? `/sessions/${encodeURIComponent(id)}` : '/');
+  auditMode.value = false;
 }
 
 async function send(message: string, persona: string): Promise<void> {
@@ -106,6 +121,7 @@ function withCurrentKnowledge(action: 'check' | 'bind' | 'reindex'): void {
 
 async function openSession(id: string): Promise<void> {
   chat.cancel();
+  if (auditMode.value) closeAudit();
   await sessions.open(id);
   const current = sessions.current.value;
   if (current) await knowledge.loadLocalHealth(current.workspaceId || 'current').catch(() => undefined);
@@ -114,13 +130,20 @@ async function openSession(id: string): Promise<void> {
 
 <template>
   <div class="app-shell">
-    <header class="topbar">
-      <a class="brand" href="/" aria-label="super helper 首页"><span class="brand-mark">H</span>super helper</a>
-      <span class="lan-notice">可信内网模式 · 暂无鉴权</span>
-      <button type="button" @click="openSettings">配置</button>
-    </header>
     <p v-if="bannerError" class="global-error" role="alert">{{ bannerError }}</p>
-    <div class="workspace-grid">
+    <AuditPage
+      v-if="auditMode && sessions.current.value"
+      :session="sessions.current.value"
+      :health="knowledge.health.value"
+      :loading="knowledge.loading.value"
+      :error="knowledge.error.value"
+      @back="closeAudit"
+      @open-logs="openLogs"
+      @check="withCurrentKnowledge('check')"
+      @bind="withCurrentKnowledge('bind')"
+      @reindex="withCurrentKnowledge('reindex')"
+    />
+    <div v-else class="workspace-grid">
       <SessionSidebar
         :sessions="sessions.sessions.value"
         :active-id="sessions.current.value?.id"
@@ -130,17 +153,12 @@ async function openSession(id: string): Promise<void> {
         @remove="sessions.remove"
       />
       <ChatPanel :session="sessions.current.value" :sending="chat.sending.value" :progress="chat.progress.value" :error="chat.error.value" :selected-persona="selectedPersona" @update-persona="selectedPersona = $event" @send="send" @retry="onRetry">
-        <template #actions><button type="button" :disabled="!sessions.current.value" @click="openLogs">日志</button></template>
+        <template #actions>
+          <button type="button" :disabled="!sessions.current.value" @click="openAudit">诊断详情</button>
+          <button type="button" :disabled="!sessions.current.value" @click="openLogs">日志</button>
+          <button type="button" @click="openSettings">配置</button>
+        </template>
       </ChatPanel>
-      <InsightPanel
-        :session="sessions.current.value"
-        :health="knowledge.health.value"
-        :loading="knowledge.loading.value"
-        :error="knowledge.error.value"
-        @check="withCurrentKnowledge('check')"
-        @bind="withCurrentKnowledge('bind')"
-        @reindex="withCurrentKnowledge('reindex')"
-      />
     </div>
     <AccessibleDrawer :open="logsOpen" title="诊断日志" :return-focus="logsOpener" @close="logsOpen = false">
       <p v-if="logs.error.value" class="error-banner">{{ logs.error.value }}</p>

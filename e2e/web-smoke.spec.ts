@@ -17,9 +17,13 @@ test('Dashboard uses production assets and real Gateway workflows', async ({ pag
   await expect(page.getByText('项目状态可以继续检查。').first()).toBeVisible();
   await expect(page.getByText('worker-secret-output')).toHaveCount(0);
   expect(requests.filter((request) => request === 'GET /api/knowledge/health')).toHaveLength(1);
+  await page.getByRole('button', { name: '诊断详情' }).click();
+  await expect(page).toHaveURL(/\/sessions\/[^/]+\/audit/);
   await page.getByRole('tab', { name: '知识健康' }).click();
   await page.getByRole('button', { name: '测试检索' }).click();
   await expect.poll(() => requests.filter((request) => request === 'GET /api/knowledge/health').length).toBe(2);
+  await page.getByRole('button', { name: '返回对话' }).click();
+  await expect(page).toHaveURL(/\/sessions\/[^/]+$/);
 
   const logButton = page.getByRole('button', { name: '日志', exact: true });
   await logButton.click();

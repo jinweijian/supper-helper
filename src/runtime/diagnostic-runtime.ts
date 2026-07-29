@@ -50,6 +50,8 @@ export class DiagnosticRuntime {
     const outputReviewAgentSpec = resolveAgentConfig('output_review').content;
     const presentationAgentSpec = resolveAgentConfig('presentation').content;
     const ragAnswerabilityAgentSpec = resolveAgentConfig('rag_answerability').content;
+    const evidenceCoverageAgentSpec = resolveAgentConfig('evidence_coverage').content;
+    const visiblePromptSafetyAgentSpec = resolveAgentConfig('visible_prompt_safety').content;
 
     this.events = new CaseRuntimeEventRecorder(store);
     this.reviewer = new ReviewPresentationService(
@@ -59,6 +61,8 @@ export class DiagnosticRuntime {
       mainAgentSpec,
       outputReviewAgentSpec,
       presentationAgentSpec,
+      evidenceCoverageAgentSpec,
+      visiblePromptSafetyAgentSpec,
     );
     this.sessions = new SessionLifecycle(config, store, this.events);
     this.preflight = new PreflightService(

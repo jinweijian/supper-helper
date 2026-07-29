@@ -372,7 +372,7 @@ const activeUntilFormalReplyScenarios = [
   {
     name: 'Experience path',
     message: '课程任务保存失败是什么原因？',
-    expectedTerminalStatus: 'concluded',
+    expectedTerminalStatus: 'partial',
     setup({ store }) {
       seedReusableExperience(store, this.message);
       return {};
@@ -385,7 +385,7 @@ const activeUntilFormalReplyScenarios = [
   {
     name: 'Knowledge path',
     message: 'AI伴学助手如何制定学习计划？',
-    expectedTerminalStatus: 'concluded',
+    expectedTerminalStatus: 'partial',
     setup({ config }) {
       seedAnswerableKnowledge(config);
       return {};
@@ -398,7 +398,7 @@ const activeUntilFormalReplyScenarios = [
   {
     name: 'MCP path',
     message: '请确认配置证据路径。',
-    expectedTerminalStatus: 'concluded',
+    expectedTerminalStatus: 'partial',
     setup({ config }) {
       config.workspaces[0].mcpToolIds = ['local-docs'];
       config.mcpTools = [{
@@ -446,7 +446,7 @@ const activeUntilFormalReplyScenarios = [
   {
     name: 'Worker path',
     message: '请检查项目的运行时拆分是否可诊断。',
-    expectedTerminalStatus: 'concluded',
+    expectedTerminalStatus: 'partial',
     setup() {
       return {};
     },
@@ -587,7 +587,7 @@ test('keeps Worker follow-up active until formal reply', async () => {
     const formalReplies = settled.caseSession.messages.filter((message) => (
       message.role === 'helper' && message.replyToMessageId === turn.userMessageId
     ));
-    assert.equal(settled.caseSession.status, 'concluded');
+    assert.equal(settled.caseSession.status, 'partial');
     assert.equal(formalReplies.length, 1);
     assert.equal(workerRequests.length, 2);
   } finally {
@@ -628,7 +628,7 @@ test('completeUserTurn consumes message ID and binds replyToMessageId', async ()
     const turn = agent.startUserTurn({ message: '请检查项目的运行时拆分是否可诊断。' });
     const response = await agent.completeUserTurn(turn.caseSession.id, turn.userMessageId);
 
-    assert.equal(response.decision, 'final');
+    assert.equal(response.decision, 'partial');
     const helperMessages = response.caseSession.messages.filter((message) => message.role === 'helper' && message.replyToMessageId);
     const reply = helperMessages.at(-1);
     assert.ok(reply, 'a helper reply must be created');
