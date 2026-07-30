@@ -2,6 +2,7 @@ node_modules/
 dist/
 .turbo/
 .super-helper/
+.worktrees/
 /knowledge/
 .DS_Store
 *.log
