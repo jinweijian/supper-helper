@@ -43,6 +43,7 @@ export function buildDiagnosticRequestFromResolvedTurn(input: {
   const knownFacts = resolvedTurn.confirmedFacts.map((fact) => fact.text);
   const constraints = [
     'Claude Code is an inspection tool and must not respond directly to the user.',
+    'Enforce the runtime read-only permission boundary; do not execute writes, deletion, deployment, production changes, or other mutations.',
     ...(input.includePersonaConstraints ? personaDiagnosticConstraints(caseSession.userPersona) : []),
     'Handle both troubleshooting requests and general project questions.',
     'Return structured evidence, assumptions, missing information, and recommended next action.',

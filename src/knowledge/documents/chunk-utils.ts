@@ -41,10 +41,14 @@ export function lastBoundedCompleteSentence(text: string, maxChars: number): str
 
 export function normalizeChunkingOptions(options?: KnowledgeChunkingOptions): NormalizedChunkingOptions {
   const maxChars = positiveInteger(options?.maxChars, DEFAULT_CHUNKING_OPTIONS.maxChars);
+  const requestedOverlap = options?.overlapChars;
+  const overlapChars = Number.isFinite(requestedOverlap) && requestedOverlap! >= 0
+    ? Math.floor(requestedOverlap!)
+    : DEFAULT_CHUNKING_OPTIONS.overlapChars;
   return {
     maxChars,
     overlapStrategy: options?.overlapStrategy === 'sliding' ? 'sliding' : 'sentence',
-    overlapChars: Math.min(positiveInteger(options?.overlapChars, DEFAULT_CHUNKING_OPTIONS.overlapChars), maxChars),
+    overlapChars: Math.min(overlapChars, maxChars),
     minChars: Math.min(positiveInteger(options?.minChars, DEFAULT_CHUNKING_OPTIONS.minChars), maxChars),
   };
 }
@@ -76,5 +80,5 @@ export function slug(value: string): string {
 export function markLegacyChunk(chunk: KnowledgeChunk): KnowledgeChunk {
   const current = chunk.artifact_version === CURRENT_ARTIFACT_VERSION
     && chunk.chunking_strategy === CURRENT_CHUNKING_STRATEGY;
-  return { ...chunk, legacy: chunk.legacy ?? !current };
+  return { ...chunk, legacy: !current };
 }

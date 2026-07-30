@@ -89,7 +89,7 @@ test('same-section children overlap by at most one bounded sentence', () => {
   assert.deepEqual(chunks[0].section_path, chunks[1].section_path);
 });
 
-test('parent-child builder accepts chunking options and emits v3 sentence-window chunks', () => {
+test('parent-child builder accepts chunking options and emits v4 sentence-window chunks', () => {
   const sentence = '课程发布后，学员端会根据发布范围、有效期和可加入条件决定是否展示入口。';
   const body = `# 规则\n\n## 长段落\n\n${Array.from({ length: 10 }, () => sentence).join('')}`;
   const chunks = buildKnowledgeChunks([
@@ -104,16 +104,16 @@ test('parent-child builder accepts chunking options and emits v3 sentence-window
   assert.equal(chunks.length > 1, true);
   assert.equal(chunks.every((chunk) => chunk.text.length <= 180), true);
   assert.equal(chunks.every((chunk) => !chunk.manual_split_required), true);
-  assert.equal(chunks.every((chunk) => chunk.chunking_strategy === 'parent-child-v3'), true);
-  assert.equal(chunks.every((chunk) => chunk.artifact_version === 3), true);
+  assert.equal(chunks.every((chunk) => chunk.chunking_strategy === 'parent-child-v4'), true);
+  assert.equal(chunks.every((chunk) => chunk.artifact_version === 4), true);
   assert.equal(chunks.every((chunk) => chunk.legacy === false), true);
   assert.equal((chunks[1].overlap_chars ?? 0) > 0, true);
   assert.equal((chunks[1].overlap_chars ?? 0) <= 60, true);
 });
 
-test('chunk legacy marker treats v3 as current and v2 as legacy', () => {
+test('chunk legacy marker treats v4 as current and older records as legacy', () => {
   assert.equal(markLegacyChunk({
-    chunk_id: 'chk_v3',
+    chunk_id: 'chk_v4',
     parent_id: 'doc',
     source: 'doc.md',
     module: 'course',
@@ -123,9 +123,9 @@ test('chunk legacy marker treats v3 as current and v2 as legacy', () => {
     confidence: 'high',
     headings: [],
     keywords: [],
-    text: 'v3',
-    chunking_strategy: 'parent-child-v3',
-    artifact_version: 3,
+    text: 'v4',
+    chunking_strategy: 'parent-child-v4',
+    artifact_version: 4,
   }).legacy, false);
   assert.equal(markLegacyChunk({
     chunk_id: 'chk_v2',
@@ -250,10 +250,12 @@ test('hybrid service enforces 40/40 recall, Top 20 rerank input, and Top 8 final
 });
 
 test('embedding artifacts apply metadata, visibility, quality, and legacy filters before ranking', () => {
-  const workspaceRoot = mkdtempSync(join(tmpdir(), 'super-helper-vector-filter-'));
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'super-helper-vector-filter-'));
   try {
     const indexes = join(workspaceRoot, 'knowledge', 'indexes');
-    mkdirSync(indexes, { recursive: true });
+    const generationId = 'gen_filter_fixture';
+    const generationRoot = join(indexes, 'generations', generationId);
+    mkdirSync(generationRoot, { recursive: true });
     const base = {
       module: 'course',
       intent: 'how_to',
@@ -262,8 +264,8 @@ test('embedding artifacts apply metadata, visibility, quality, and legacy filter
       confidence: 'high',
       headings: [],
       keywords: [],
-      artifact_version: 3,
-      chunking_strategy: 'parent-child-v3',
+      artifact_version: 4,
+      chunking_strategy: 'parent-child-v4',
       legacy: false,
       child_order: 1,
       source_block_ids: ['blk'],
@@ -278,8 +280,8 @@ test('embedding artifacts apply metadata, visibility, quality, and legacy filter
       { ...base, chunk_id: 'legacy', parent_id: 'p_legacy', source: 'legacy.md', visibility: 'customer_safe', legacy: true, artifact_version: undefined, text: '旧块' },
       { ...base, chunk_id: 'other_module', parent_id: 'p_other', source: 'other.md', visibility: 'customer_safe', module: 'billing', text: '账单规则' },
     ];
-    writeFileSync(join(indexes, 'chunks.jsonl'), `${chunks.map((chunk) => JSON.stringify(chunk)).join('\n')}\n`, 'utf8');
-    writeFileSync(join(indexes, 'vectors.jsonl'), `${chunks.map((chunk, index) => JSON.stringify({
+    writeFileSync(join(generationRoot, 'chunks.jsonl'), `${chunks.map((chunk) => JSON.stringify(chunk)).join('\n')}\n`, 'utf8');
+    writeFileSync(join(generationRoot, 'vectors.jsonl'), `${chunks.map((chunk, index) => JSON.stringify({
       vector_id: `vec_${chunk.chunk_id}`,
       source: chunk.source,
       document_id: chunk.parent_id,
@@ -299,6 +301,7 @@ test('embedding artifacts apply metadata, visibility, quality, and legacy filter
       limit: 40,
       moduleCandidates: ['course'],
       visibility: ['customer_safe'],
+      generationId,
     });
     assert.deepEqual(result.candidates.map((candidate) => candidate.chunkId), ['public']);
     assert.equal(result.filteredOut.some((item) => item.reason === 'visibility_filter'), true);

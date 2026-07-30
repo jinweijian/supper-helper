@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateDiagnosticResult } from '../dist/runtime/result-validator.js';
+import {
+  freezeReviewedDiagnosticResult,
+  validateDiagnosticResult,
+  validateDiagnosticStructure,
+} from '../dist/runtime/result-validator.js';
 
 const GOAL = {
   rawUserQuestion: '如何开启 X，多久生效？',
@@ -56,6 +60,31 @@ function acceptedCoverage(bindings, fullQuestionClaimIds, overrides = {}) {
     ...overrides,
   };
 }
+
+test('Gate A API: structural validation and reviewed freeze are explicit, and missing review cannot final', () => {
+  const primary = claim('primary_full', GOAL.mustAnswerItems, ['ev_primary']);
+  const structural = validateDiagnosticStructure(
+    concluded([primary], [evidence('ev_primary')]),
+    GOAL,
+  );
+  const frozen = freezeReviewedDiagnosticResult({
+    structural,
+    answerGoal: GOAL,
+    coverageReview: undefined,
+    upstreamBlockers: [],
+  });
+
+  assert.equal(frozen.result.status, 'partial');
+  assert.notEqual(frozen.result.recommendedNextAction, 'final_answer');
+  assert.deepEqual(frozen.acceptedPrimaryAnswerClaimIds, []);
+});
+
+test('Gate A API: validator implementation does not infer security semantics from arguments.length', async () => {
+  const source = await import('node:fs').then(({ readFileSync }) => (
+    readFileSync(new URL('../src/runtime/result-validator.ts', import.meta.url), 'utf8')
+  ));
+  assert.doesNotMatch(source, /arguments\.length/);
+});
 
 test('Gate A: invalid supporting claim is local rejection when reviewed primary coverage remains complete', () => {
   const primary = claim('primary_full', GOAL.mustAnswerItems, ['ev_primary']);
@@ -174,6 +203,46 @@ test('Gate A: unavailable or malformed coverage review conservatively blocks fin
     assert.equal(validation.result.status, 'partial');
     assert.notEqual(validation.result.recommendedNextAction, 'final_answer');
   }
+});
+
+test('Gate A: contradictory or unbounded coverage review output is rejected and redacted', async () => {
+  const { validateAnswerCoverageReview, unknownCoverageReview } = await import(
+    '../dist/runtime/answer-coverage.js'
+  );
+  const input = {
+    resolvedQuestion: GOAL.resolvedQuestion,
+    mustAnswerItems: GOAL.mustAnswerItems,
+    claimSegments: [{
+      id: 'primary_full',
+      text: '安全结论',
+      type: 'fact',
+      role: 'primary_answer',
+      candidateAnswerItemIds: GOAL.mustAnswerItems,
+      evidenceIds: ['ev_primary'],
+    }],
+    evidenceSegments: [{
+      id: 'ev_primary',
+      text: '安全证据',
+      kind: 'workspace',
+      freshness: 'current_worker_run',
+    }],
+  };
+  const contradictory = validateAnswerCoverageReview({
+    status: 'accepted',
+    bindings: [{
+      claimId: 'primary_full',
+      answerItemIds: GOAL.mustAnswerItems,
+      evidenceIds: ['ev_primary'],
+    }],
+    fullQuestion: 'full',
+    fullQuestionClaimIds: ['primary_full'],
+    missingElements: ['仍有缺项'],
+  }, input);
+  assert.equal(contradictory.status, 'unknown');
+
+  const secret = unknownCoverageReview(`token=sk-${'a'.repeat(40)} ${'长'.repeat(300)}`);
+  assert.doesNotMatch(secret.reason, /sk-|a{20}/);
+  assert.ok(Array.from(secret.reason).length <= 160);
 });
 
 test('Gate A: sentinel still requires independent coverage of the complete resolved question', () => {

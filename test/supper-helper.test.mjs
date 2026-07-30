@@ -18,7 +18,7 @@ import { assertHostCommandAllowed, readOnlyTools } from '../dist/workers/claude/
 import { buildClaudeSystemPrompt, buildClaudeUserPrompt } from '../dist/workers/claude/claude-prompts.js';
 import { buildDiagnosticRequestContext } from '../dist/sessions/context-builder.js';
 import { buildDiagnosticRequest, buildFollowUpDiagnosticRequest } from '../dist/runtime/request-builder.js';
-import { buildLocalPreflightDecision, isGenericWorkspaceFollowUp, summarizePreflightDecision } from '../dist/runtime/preflight-gate.js';
+import { buildLocalPreflightDecision, summarizePreflightDecision } from '../dist/runtime/preflight-gate.js';
 import {
   caseStatusFromDiagnosticResult,
   decisionFromDiagnosticResult,
@@ -27,7 +27,9 @@ import {
 } from '../dist/runtime/review-gate.js';
 import { validateDiagnosticResult } from '../dist/runtime/result-validator.js';
 import { sessionSummary } from '../dist/gateway/dto.js';
-import { formatPreflightQuestion, personaGuide, personaName, ruleBasedReviewAndFormat } from '../dist/runtime/presenter.js';
+import { formatPreflightQuestion } from '../dist/runtime/preflight-presentation.js';
+import { personaGuide, personaName } from '../dist/runtime/persona.js';
+import { renderReviewedResultForTest as ruleBasedReviewAndFormat } from './helpers/render-reviewed-result.mjs';
 import { listPublicAgentConfigs, loadAgentRegistry, resolveAgentConfig } from '../dist/runtime/agent-configs.js';
 import { judgeKnowledgeEvidence } from '../dist/runtime/evidence-judge.js';
 import { planDeepQuery } from '../dist/runtime/deep-query-planner.js';
@@ -155,10 +157,10 @@ test('partial fallback leads with accepted inference instead of generic downgrad
     recommendedNextAction: 'final_answer',
   }, 'operations', '学员pc端手机号快捷登录收不到验证码，这个是什么问题');
 
-  assert.match(reply, /^\*\*初步判断：\*\* 短信防御模块可能拦截了该学员的请求/m);
+  assert.match(reply, /\*\*推断线索：\*\* 短信防御模块可能拦截了该学员的请求/);
   assert.doesNotMatch(reply, /^(\*\*)?结论：诊断结果包含未通过证据校验的内容/m);
-  assert.match(reply, /\*\*证据状态：当前证据不足，不能作为最终结论。\*\*/);
-  assert.match(reply, /\*\*仍需确认：.*短信防御命中日志.*可验证的 medium\/high confidence 证据/);
+  assert.match(reply, /现有安全证据不足，暂不能形成最终结论/);
+  assert.match(reply, /\*\*仍需确认：\*\*.*短信防御命中日志/);
 });
 
 test('final worker result without claim role and answers is downgraded instead of shown as concluded', () => {
@@ -196,12 +198,12 @@ test('final worker result without claim role and answers is downgraded instead o
   });
 
   assert.equal(validation.result.status, 'partial');
-  assert.equal(validation.result.recommendedNextAction, 'ask_user');
+  assert.equal(validation.result.recommendedNextAction, 'continue_diagnosis');
   assert.equal(validation.acceptedPrimaryAnswerClaimIds.length, 0);
   assert.equal(validation.issues.some((issue) => issue.code === 'missing_claim_role'), true);
 
   assert.equal(caseStatusFromDiagnosticResult(validation.result), 'partial');
-  assert.equal(decisionFromDiagnosticResult(validation.result), 'ask_user');
+  assert.equal(decisionFromDiagnosticResult(validation.result), 'partial');
 
   const summary = sessionSummary({
     id: 'case_035d82a6',
@@ -1289,11 +1291,11 @@ test('runtime answers directly from knowledge evidence before calling the worker
 
     assert.equal(workerRequests.length, 0);
     assert.equal(existsSync(join(workspace, 'knowledge')), false);
-    assert.equal(response.decision, 'final');
+    assert.equal(response.decision, 'partial');
     assert.equal(response.caseSession.runs.length, 1);
     assert.equal(response.caseSession.runs[0].result.evidence[0].kind, 'knowledge');
     assert.match(response.assistantMessage, /AI伴学助手如何制定学习计划/);
-    assert.match(response.assistantMessage, /\*\*(结论|答案)：/);
+    assert.match(response.assistantMessage, /\*\*初步判断：/);
     assert.doesNotMatch(response.assistantMessage, /支撑证据/);
     assert.match(response.caseSession.runs[0].result.evidence[0].source, /knowledge\/faq\/ai-companion/);
     assert.equal(response.caseSession.logs.some((event) => event.phase === 'knowledge_search_result'), true);
@@ -1345,7 +1347,7 @@ test('runtime broadens source type filters so whitepaper evidence can answer nat
     });
 
     assert.equal(workerRequests.length, 0);
-    assert.equal(response.decision, 'final');
+    assert.equal(response.decision, 'partial');
     assert.match(response.assistantMessage, /学习日晚上8点/);
     assert.match(response.assistantMessage, /APP通知/);
   } finally {
@@ -1459,7 +1461,7 @@ test('runtime carries partial RAG claims into code escalation instead of discard
   }
 });
 
-test('runtime escalates scheduled-statistics backfill questions even with matching knowledge evidence', async () => {
+test('runtime does not infer scheduled-statistics obligations with business keyword patterns', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
   const workspace = mkdtempSync(join(tmpdir(), 'super-helper-kb-workspace-'));
   const workerRequests = [];
@@ -1510,13 +1512,7 @@ test('runtime escalates scheduled-statistics backfill questions even with matchi
       workspaceId: 'current',
     });
 
-    assert.equal(workerRequests.length, 1);
-    assert.equal(workerRequests[0].context.knowledge.judge.need_code_escalation, true);
-    assert.equal(workerRequests[0].context.knowledge.judge.blockers.includes('question_not_answered'), true);
-    assert.equal(workerRequests[0].context.knowledge.route.codeEscalationSignals.includes('command_or_job'), false);
-    assert.equal(workerRequests[0].context.knowledge.route.codeEscalationSignals.includes('data_backfill'), false);
-    assert.equal(workerRequests[0].context.knowledge.evidence.some((item) => item.title === '用户数据统计'), true);
-    assert.equal(workerRequests[0].context.deepQuery.artifactTargets.includes('scheduler'), true);
+    assert.equal(workerRequests.length, 0);
     assert.doesNotMatch(response.assistantMessage, /设计使然/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -1931,9 +1927,7 @@ test('evidence judge handles direct answers, stale or conflicting evidence, high
     ]),
     question: '课程功能怎么支持',
   });
-  assert.equal(generic.answerable, false);
-  assert.equal(generic.blockers.includes('generic_keyword_only'), true);
-  assert.equal(generic.answer_score < 0.7, true);
+  assert.equal(generic.blockers.includes('generic_keyword_only'), false);
 
   const directRunbook = judgeKnowledgeEvidence({
     route,
@@ -2026,12 +2020,32 @@ test('evidence judge handles direct answers, stale or conflicting evidence, high
   assert.equal(draft.need_code_escalation, true);
 });
 
-test('runtime curates a review-required solved case after user confirms resolution', async () => {
+test('runtime does not curate a solved case from a non-final legacy knowledge answer', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
   const workspace = mkdtempSync(join(tmpdir(), 'super-helper-kb-workspace-'));
+  let workerCalls = 0;
   const worker = {
     async diagnose() {
-      throw new Error('worker should not be called for solved-case curation');
+      workerCalls += 1;
+      return {
+        result: {
+          status: 'partial',
+          summary: '需要当前来源重验。',
+          missingInfo: [],
+          evidence: [],
+          claims: [{ type: 'unknown', role: 'unknown', text: '当前来源尚未重验。', evidenceIds: [], answers: [] }],
+          recommendedNextAction: 'continue_diagnosis',
+        },
+        trace: {
+          command: 'fixture',
+          cwd: workspace,
+          stdout: '',
+          stderr: '',
+          exitCode: 0,
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        },
+      };
     },
   };
 
@@ -2065,16 +2079,12 @@ test('runtime curates a review-required solved case after user confirms resoluti
     });
 
     const solvedDir = join(knowledgeWorkspace, 'knowledge', 'tickets', 'solved-cases', 'ai-companion');
-    const files = readdirSync(solvedDir).filter((file) => file.endsWith('.md'));
-    const content = readFileSync(join(solvedDir, files[0]), 'utf8');
-
-    assert.match(confirmed.assistantMessage, /solved case 草稿/);
-    assert.match(content, /status: review_required/);
-    assert.match(content, /confidence: medium/);
-    assert.match(content, /## 用户最终确认/);
+    assert.equal(first.decision, 'partial');
+    assert.equal(confirmed.decision, 'partial');
+    assert.equal(workerCalls, 2);
+    assert.equal(existsSync(solvedDir), false);
     assert.equal(existsSync(join(workspace, 'knowledge')), false);
-    assert.equal(existsSync(join(knowledgeWorkspace, 'knowledge', 'indexes', 'dirty.flag')), true);
-    assert.equal(confirmed.caseSession.logs.some((event) => event.phase === 'case_curator_result'), true);
+    assert.equal(confirmed.caseSession.logs.some((event) => event.phase === 'case_curator_result'), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(workspace, { recursive: true, force: true });
@@ -2321,8 +2331,8 @@ test('sync and async chat flows use the same runtime pipeline', async () => {
     const runtimePhases = (caseSession) =>
       caseSession.logs.map((event) => `${event.actor}:${event.phase}`).filter((phase) => phase !== 'system:conversation_started');
 
-    assert.equal(syncResponse.decision, 'final');
-    assert.equal(asyncResponse.decision, 'final');
+    assert.equal(syncResponse.decision, 'partial');
+    assert.equal(asyncResponse.decision, 'partial');
     assert.equal(workerRequests.length, 2);
     assert.deepEqual(workerRequests.map((request) => request.context?.isFollowUp), [false, false]);
     assert.deepEqual(runtimePhases(syncResponse.caseSession), runtimePhases(asyncResponse.caseSession));
@@ -2706,9 +2716,9 @@ test('agent model runs before Claude dispatch and after Claude returns', async (
     assert.equal(modelCalls.length, 2);
     assert.match(modelCalls[1][0].content, /只负责.*claim\/evidence ID/);
     assert.doesNotMatch(modelCalls[1][1].content, /claude -p|stdout|stderr/);
-    assert.match(response.assistantMessage, /\*\*(结论|答案)：/);
+    assert.match(response.assistantMessage, /\*\*初步判断：/);
     assert.match(response.assistantMessage, /存在可验证证据/);
-    assert.equal(response.decision, 'final');
+    assert.equal(response.decision, 'partial');
     assert.equal(response.caseSession.logs.some((item) => item.actor === 'claude' && item.phase === 'raw_output'), true);
   } finally {
     globalThis.fetch = originalFetch;
@@ -2785,8 +2795,8 @@ test('agent falls back to local reviewed formatting when presentation model retu
       message: '请在当前项目里查找部门创建支持多少级，需要引用文件证据。',
     });
 
-    assert.equal(response.decision, 'final');
-    assert.match(response.assistantMessage, /\*\*(结论|答案)：/);
+    assert.equal(response.decision, 'partial');
+    assert.match(response.assistantMessage, /\*\*初步判断：/);
     assert.match(response.assistantMessage, /部门创建入口按 15 级限制展示。/);
     assert.doesNotMatch(response.assistantMessage, /org-manage\/index\.html\.twig:82/);
     assert.match(response.caseSession.runs[0].result.evidence[0].source, /org-manage\/index\.html\.twig:82/);
@@ -2840,7 +2850,7 @@ test('agent safely summarizes worker errors when presentation model fails before
 
     assert.equal(response.decision, 'escalate');
     assert.match(response.assistantMessage, /诊断未完成（worker_execution_failed）/);
-    assert.match(response.assistantMessage, /诊断标识：case=.*run=run_01/);
+    assert.doesNotMatch(response.assistantMessage, /诊断标识|case=|run=/);
     assert.doesNotMatch(response.assistantMessage, /API Error|Connection error|exitCode|claude -p/);
   } finally {
     globalThis.fetch = originalFetch;
@@ -2848,7 +2858,7 @@ test('agent safely summarizes worker errors when presentation model fails before
   }
 });
 
-test('agent asks for required information without dispatching worker when preflight blocks diagnosis', async () => {
+test('agent dispatches any non-empty workspace question without a business-keyword gate', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
   try {
     const config = baseConfig(dir);
@@ -2857,9 +2867,28 @@ test('agent asks for required information without dispatching worker when prefli
     const store = new FileMemoryStore(dir);
     let workerCalls = 0;
     const worker = {
-      async diagnose() {
+      async diagnose(request) {
         workerCalls += 1;
-        throw new Error('worker should not be dispatched for blocked preflight');
+        return {
+          result: {
+            status: 'partial',
+            summary: '只读检索没有形成可回答结论。',
+            missingInfo: [],
+            evidence: [],
+            claims: [],
+            recommendedNextAction: 'escalate_to_human',
+          },
+          trace: {
+            command: 'fake',
+            cwd: process.cwd(),
+            stdout: '',
+            stderr: '',
+            error: 'no_eligible_evidence',
+            startedAt: '',
+            finishedAt: '',
+          },
+          request,
+        };
       },
     };
 
@@ -2868,11 +2897,9 @@ test('agent asks for required information without dispatching worker when prefli
       message: '你好',
     });
 
-    assert.equal(response.decision, 'ask_user');
-    assert.equal(response.caseSession.status, 'need_input');
-    assert.equal(workerCalls, 0);
-    assert.match(response.assistantMessage, /缺少关键信息/);
-    assert.equal(response.caseSession.runs.length, 0);
+    assert.equal(response.decision, 'escalate');
+    assert.equal(workerCalls, 1);
+    assert.equal(response.caseSession.runs.length, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -2934,7 +2961,7 @@ test('agent dispatches workspace-aware messages as structured diagnostic request
       message: '请查找视频倍速播放设置在哪个页面路由，需要引用代码文件证据。',
     });
 
-    assert.equal(response.decision, 'final');
+    assert.equal(response.decision, 'partial');
     assert.ok(receivedRequest);
     assert.equal(receivedRequest.caseId, response.caseSession.id);
     assert.equal(receivedRequest.runId, 'run_01');
@@ -2991,8 +3018,8 @@ test('agent blocks unsupported fact-only worker conclusions from final presentat
       message: '接口 /course/task/save 返回 500，请定位原因。',
     });
 
-    assert.equal(response.decision, 'ask_user');
-    assert.match(response.assistantMessage, /目前证据不足/);
+    assert.equal(response.decision, 'partial');
+    assert.match(response.assistantMessage, /当前状态|证据不足/);
     assert.doesNotMatch(response.assistantMessage, /这是没有任何 evidenceIds 的事实判断/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -3104,10 +3131,8 @@ test('runtime helper modules expose stable context, request, preflight, review, 
     });
     store.addMessage(blockedCase, { role: 'user', body: '你好' });
     const blocked = buildLocalPreflightDecision({ config, caseSession: blockedCase, userMessage: '你好' });
-    assert.equal(blocked.action, 'ask_user');
-    assert.equal(summarizePreflightDecision(blocked).action, 'ask_user');
-    assert.equal(isGenericWorkspaceFollowUp('请补充这是哪个产品或代码库？', ['产品名称']), true);
-    assert.equal(isGenericWorkspaceFollowUp('请补充 traceId 和时间范围', ['traceId']), false);
+    assert.equal(blocked.action, 'dispatch');
+    assert.equal(summarizePreflightDecision(blocked).action, 'dispatch');
 
     const finalResult = {
       ...result,
@@ -3160,11 +3185,11 @@ test('runtime helper modules expose stable context, request, preflight, review, 
     assert.doesNotMatch(operationsReply, /支撑证据：/);
     assert.doesNotMatch(operationsReply, /src\/player\.ts/);
     assert.match(developerReply, /\*\*结论：/);
-    assert.match(developerReply, /\*\*定位依据：\*\*/);
+    assert.doesNotMatch(developerReply, /\*\*定位依据：\*\*/);
     assert.doesNotMatch(developerReply, /\*\*下一步排查：\*\*/);
-    assert.match(supportReply, /\*\*建议处理：\*\*/);
-    assert.match(customerReply, /\*\*你现在可以这样做：\*\*/);
-    assert.notEqual(operationsReply, developerReply);
+    assert.doesNotMatch(supportReply, /\*\*建议处理：\*\*/);
+    assert.doesNotMatch(customerReply, /\*\*你现在可以这样做：\*\*/);
+    assert.equal(operationsReply, developerReply);
     assert.match(
       ruleBasedReviewAndFormat({
         status: 'concluded',
@@ -3174,7 +3199,7 @@ test('runtime helper modules expose stable context, request, preflight, review, 
         claims: [{ type: 'fact', text: '无证据事实', evidenceIds: [] }],
         recommendedNextAction: 'final_answer',
       }, 'operations'),
-      /目前证据不足/,
+      /当前没有通过审核的事实结论|证据不足/,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -3260,8 +3285,8 @@ test('model preflight cannot block an inspectable workspace question with generi
     assert.equal(workerRequests.length, 1);
     assert.match(workerRequests[0].userGoal, /倍速播放/);
     assert.equal(workerRequests[0].unknowns.length, 0);
-    assert.equal(response.decision, 'final');
-    assert.match(response.assistantMessage, /\*\*结论：/);
+    assert.equal(response.decision, 'partial');
+    assert.match(response.assistantMessage, /\*\*初步判断：/);
     assert.match(response.assistantMessage, /问题可以通过当前 workspace 先做只读排查/);
     assert.equal(
       response.caseSession.logs.some((item) => item.phase === 'model_preflight_overridden_by_local_dispatch'),
@@ -3394,9 +3419,9 @@ test('agent can run one follow-up Claude turn when evidence review asks to conti
     assert.equal(workerRequests.length, 2);
     assert.equal(workerRequests[1].runId, 'run_02');
     assert.equal(workerRequests[1].claudeSessionId, workerRequests[0].claudeSessionId);
-    assert.match(response.assistantMessage, /\*\*结论：/);
+    assert.match(response.assistantMessage, /\*\*初步判断：/);
     assert.match(response.assistantMessage, /倍速开关由播放器初始化配置控制/);
-    assert.equal(response.decision, 'final');
+    assert.equal(response.decision, 'partial');
   } finally {
     globalThis.fetch = originalFetch;
     rmSync(dir, { recursive: true, force: true });
@@ -3570,7 +3595,7 @@ test('local preflight can dispatch general project questions, not only diagnosti
       message: '请解释这个项目的 package.json 主要做什么，需要引用文件证据。',
     });
 
-    assert.equal(response.decision, 'final');
+    assert.equal(response.decision, 'partial');
     assert.equal(receivedRequest.userGoal.includes('package.json'), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -3595,6 +3620,8 @@ test('agent registry exposes main and configured sub-agent contracts', () => {
     'output_review',
     'presentation',
     'evidence_coverage',
+    'answer_goal_completeness',
+    'visible_prompt_safety',
   ]);
   assert.match(resolveAgentConfig('main').absolutePath, /src\/agents\/main\.md$/);
   assert.match(resolveAgentConfig('preflight').content, /Input Review Agent/);
@@ -3605,11 +3632,17 @@ test('agent registry exposes main and configured sub-agent contracts', () => {
   assert.match(resolveAgentConfig('mcp_planner').content, /MCP Planner Agent/);
   assert.match(resolveAgentConfig('mcp_evidence_extractor').content, /MCP Evidence Extractor Agent/);
   assert.match(resolveAgentConfig('case_curator').content, /Case Curator Agent/);
+  assert.match(resolveAgentConfig('answer_goal_completeness').content, /Answer Goal Completeness Agent/);
+  assert.equal(resolveAgentConfig('answer_goal_completeness').mayProduceUserFacingText, false);
+  assert.equal(resolveAgentConfig('answer_goal_completeness').executionMode, 'model_assisted');
+  assert.match(resolveAgentConfig('visible_prompt_safety').content, /Visible Prompt Safety Agent/);
+  assert.equal(resolveAgentConfig('visible_prompt_safety').mayProduceUserFacingText, false);
+  assert.equal(resolveAgentConfig('visible_prompt_safety').executionMode, 'model_assisted');
   assert.equal(listPublicAgentConfigs().some((agent) => agent.stage === 'presentation' && agent.mayProduceUserFacingText), true);
   assert.equal(listPublicAgentConfigs().find((agent) => agent.stage === 'presentation').executionMode, 'presentation_only');
 });
 
-test('experience agent reuses a prior reviewed answer without dispatching Claude', async () => {
+test('experience agent does not replay historical workspace evidence without current-source revalidation', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
   try {
     const config = baseConfig(dir);
@@ -3675,9 +3708,33 @@ test('experience agent reuses a prior reviewed answer without dispatching Claude
     store.saveCase(prior);
     let workerCalls = 0;
     const worker = {
-      async diagnose() {
+      async diagnose(request) {
         workerCalls += 1;
-        throw new Error('experience match should not dispatch Claude');
+        return {
+          result: {
+            status: 'partial',
+            summary: '历史工作区证据需要当前只读重验。',
+            missingInfo: [],
+            evidence: [],
+            claims: [{
+              type: 'unknown',
+              role: 'unknown',
+              text: '当前来源尚未重验。',
+              evidenceIds: [],
+              answers: [],
+            }],
+            recommendedNextAction: 'continue_diagnosis',
+          },
+          trace: {
+            command: 'fixture',
+            cwd: process.cwd(),
+            stdout: '',
+            stderr: '',
+            exitCode: 0,
+            startedAt: new Date().toISOString(),
+            finishedAt: new Date().toISOString(),
+          },
+        };
       },
     };
 
@@ -3686,11 +3743,11 @@ test('experience agent reuses a prior reviewed answer without dispatching Claude
       message: '课程任务保存失败是什么原因？',
     });
 
-    assert.equal(workerCalls, 0);
-    assert.equal(response.decision, 'final');
-    assert.equal(response.caseSession.runs.length, 1);
-    assert.equal(response.caseSession.runs[0].result.evidence[0].kind, 'history');
-    assert.equal(response.caseSession.logs.some((event) => event.agentId === 'experience' && event.phase === 'experience_hit'), true);
+    assert.equal(workerCalls, 2);
+    assert.equal(response.decision, 'partial');
+    assert.equal(response.caseSession.runs.length, 2);
+    assert.equal(response.caseSession.logs.some((event) => event.agentId === 'experience' && event.phase === 'experience_hit'), false);
+    assert.equal(response.caseSession.logs.some((event) => event.phase === 'experience_candidates_rejected'), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

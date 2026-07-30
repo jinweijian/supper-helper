@@ -4,14 +4,16 @@ import type { DiagnosticRun, UserPersona } from '../domain.js';
 import { createModelClient } from '../providers/model/adapter.js';
 import type { CaseRepository, StoredCase } from '../sessions/case-repository.js';
 import type { DiagnosticWorker } from '../workers/diagnostic-worker.js';
+import type { AgentModelClient } from '../providers/model/adapter.js';
 import { resolveAgentConfig } from './agent-configs.js';
 import { CaseCurationService } from './case-curation-service.js';
 import type { RuntimeTurnResponse, AcceptedUserTurn } from './contracts.js';
 import { CaseRuntimeEventRecorder } from './event-recorder.js';
 import { ExperienceTurnService } from './experience-turn.js';
+import { KnowledgeExperienceEvidenceResolver } from './knowledge-experience-resolver.js';
 import { KnowledgeTurnService } from './knowledge-turn.js';
 import { PreflightService } from './preflight-service.js';
-import { formatPreflightQuestion } from './presenter.js';
+import { formatPreflightQuestion } from './preflight-presentation.js';
 import { RagAnswerabilityService } from './rag-answerability-service.js';
 import { ReviewPresentationService } from './review-presentation.js';
 import { SessionLifecycle } from './session-lifecycle.js';
@@ -23,7 +25,10 @@ import { findRetryableInterruption, markInheritedActiveTurnsRetryable, removeInt
 import { completePresentedTurn } from './turn-completion.js';
 
 export interface AgentResponse extends RuntimeTurnResponse {}
-export interface DiagnosticRuntimeOptions { mcp?: McpEvidenceServiceOptions }
+export interface DiagnosticRuntimeOptions {
+  mcp?: McpEvidenceServiceOptions;
+  model?: AgentModelClient;
+}
 
 export class DiagnosticRuntime {
   private readonly events: CaseRuntimeEventRecorder;
@@ -43,7 +48,7 @@ export class DiagnosticRuntime {
     worker: DiagnosticWorker,
     options: DiagnosticRuntimeOptions = {},
   ) {
-    const model = createModelClient(getModelProvider(config));
+    const model = options.model ?? createModelClient(getModelProvider(config));
     const mainAgentSpec = resolveAgentConfig('main').content;
     const inputReviewAgentSpec = resolveAgentConfig('preflight').content;
     const experienceAgentSpec = resolveAgentConfig('experience').content;
@@ -52,6 +57,7 @@ export class DiagnosticRuntime {
     const ragAnswerabilityAgentSpec = resolveAgentConfig('rag_answerability').content;
     const evidenceCoverageAgentSpec = resolveAgentConfig('evidence_coverage').content;
     const visiblePromptSafetyAgentSpec = resolveAgentConfig('visible_prompt_safety').content;
+    const answerGoalCompletenessAgentSpec = resolveAgentConfig('answer_goal_completeness').content;
 
     this.events = new CaseRuntimeEventRecorder(store);
     this.reviewer = new ReviewPresentationService(
@@ -73,8 +79,14 @@ export class DiagnosticRuntime {
       mainAgentSpec,
       inputReviewAgentSpec,
       experienceAgentSpec,
+      answerGoalCompletenessAgentSpec,
     );
-    this.experienceTurn = new ExperienceTurnService(store, this.events, this.reviewer);
+    this.experienceTurn = new ExperienceTurnService(
+      store,
+      this.events,
+      this.reviewer,
+      new KnowledgeExperienceEvidenceResolver(config),
+    );
     const ragAnswerabilityService = new RagAnswerabilityService(
       model,
       ragAnswerabilityAgentSpec,
@@ -245,7 +257,14 @@ export class DiagnosticRuntime {
       };
       caseSession.status = 'diagnosing';
       this.store.addRun(caseSession, run);
-      const review = await this.reviewer.reviewAndFormat(caseSession, mcpResult, run);
+      const review = await this.reviewer.reviewAndFormat(caseSession, mcpResult, run, {
+        coverageEvidenceEnvelopes: this.mcpEvidence.currentCoverageEvidence(decision.request)
+          .map((item) => ({
+            ...item,
+            kind: 'mcp' as const,
+            freshness: 'current_mcp_call' as const,
+          })),
+      });
       return completePresentedTurn({
         store: this.store,
         events: this.events,

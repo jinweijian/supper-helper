@@ -61,7 +61,7 @@ ${input.sourceDocumentPath ? `source_document: ${input.sourceDocumentPath}\n` : 
 ${yamlArray(input.sourceBlockIds)}
 section_path:
 ${yamlArray(input.sectionPath)}
-chunking_strategy: parent-child-v3
+chunking_strategy: parent-child-v4
 pipeline_stage: ${stage}
 pipeline_status: ${status}
 quality_status: unchecked

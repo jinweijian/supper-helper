@@ -54,7 +54,7 @@ export function generateKnowledgeMigrationReport(input: {
     };
   });
   const legacyChunks = chunks
-    .filter((chunk) => chunk.legacy || chunk.artifact_version !== 3 || chunk.chunking_strategy !== 'parent-child-v3')
+    .filter((chunk) => chunk.legacy || chunk.artifact_version !== 4 || chunk.chunking_strategy !== 'parent-child-v4')
     .map((chunk) => ({
       chunkId: chunk.chunk_id,
       parentId: chunk.parent_id,
@@ -133,9 +133,9 @@ function parentBlockers(
     ...(!frontmatter.source_document_id ? ['missing_source_document_id'] : []),
     ...(!frontmatter.source_block_ids?.length ? ['missing_source_block_ids'] : []),
     ...(!frontmatter.section_path?.length ? ['missing_section_path'] : []),
-    ...(frontmatter.chunking_strategy !== 'parent-child-v3' ? ['legacy_parent_strategy'] : []),
+    ...(frontmatter.chunking_strategy !== 'parent-child-v4' ? ['legacy_parent_strategy'] : []),
     ...(chunks.length === 0 ? ['missing_children'] : []),
-    ...(chunks.some((chunk) => chunk.legacy || chunk.artifact_version !== 3) ? ['legacy_child'] : []),
+    ...(chunks.some((chunk) => chunk.legacy || chunk.artifact_version !== 4) ? ['legacy_child'] : []),
     ...(chunks.some((chunk) => !chunk.source_block_ids?.length || !chunk.section_path?.length) ? ['incomplete_child_provenance'] : []),
   ]));
 }

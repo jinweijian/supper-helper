@@ -1,5 +1,6 @@
 import type { ClaudeWorkerResponse, DiagnosticRequest, DiagnosticResult } from '../../domain.js';
 import type { CommandExecution } from './claude-cli.js';
+import { normalizeWorkerDiagnosticResult } from './worker-result-normalizer.js';
 
 export function parseClaudeOutput(stdout: string, request: DiagnosticRequest): DiagnosticResult {
   try {
@@ -32,7 +33,10 @@ export function parseClaudeOutput(stdout: string, request: DiagnosticRequest): D
     }
     const text = 'result' in outer && typeof outer.result === 'string' ? outer.result : JSON.stringify(outer);
     const jsonText = extractFirstJsonObjectText(text);
-    return JSON.parse(jsonText) as DiagnosticResult;
+    return normalizeWorkerDiagnosticResult(
+      JSON.parse(jsonText) as DiagnosticResult,
+      request,
+    );
   } catch {
     return {
       status: 'partial',

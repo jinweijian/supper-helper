@@ -47,9 +47,8 @@ DiagnosticResult
 
 ## Presentation 规则
 
-- 只能返回 `answerTarget`、`directAnswer`、`reply`、`claimIds`、`evidenceIds`、`directAnswerClaimIds`。
-- `directAnswerClaimIds` 必须等于冻结的 primary answer claim IDs。
-- `reply` 首段必须覆盖 `directAnswer`。
+- 只能返回 frozen primary/supporting/action/evidence ID 的排序和封闭 layout。
+- primary ID 集合必须等于 runtime 冻结的 primary answer claim IDs。
 - 完整可见回复必须落在 accepted claims/evidence/missingInfo 内。
 - 引用 evidence 必须来自 selected accepted claims。
 - 校验失败时使用本地 fallback presenter。
@@ -73,6 +72,15 @@ DiagnosticResult
 - `src/runtime/event-recorder.ts`
 - `src/agents/output-review.md`
 - `src/agents/presentation.md`
+
+Coverage review 使用 source-neutral safe segments。producer 的 `answers` 只是候选：
+独立 reviewer 给出 claim→item bindings、完整问题状态和
+`fullQuestionClaimIds`，runtime 再冻结 greedy item cover 与 required full-question claims 的稳定并集。
+Knowledge 仅接受当前 active v4 generation，Workspace/Log 仅接受当前 run，MCP 仅接受当前
+allowlisted read-only call，manual 仅接受当前 source message；history/unknown 不产生 coverage segment。
+
+Presentation 只接收 `SafeFrozenAnswerProjection`。模型与 fallback renderer 使用同一份已脱敏、
+有界、带 provenance 的 projection；raw result、summary、trace 和未选 evidence 在类型和生产组合上均不可达。
 
 ## 不负责什么
 

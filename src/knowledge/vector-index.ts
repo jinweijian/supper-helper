@@ -1,29 +1,38 @@
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type {
   EmbeddingArtifactConfig,
   EmbeddingDocumentContract,
   EmbeddingDocumentPort,
 } from '../contracts/embedding.js';
-import { chunksPath, indexesDir, vectorBuildReportPath, vectorManifestPath, vectorsPath } from './paths.js';
+import { indexesDir, vectorBuildReportPath, vectorManifestPath, vectorsPath } from './paths.js';
 import type {
   KnowledgeChunk,
   KnowledgeVectorBuildReport,
   KnowledgeVectorManifest,
   KnowledgeVectorRecord,
 } from './types.js';
-import { markLegacyChunk } from './documents/chunks.js';
-import { embeddingConfigFingerprint, formatEmbeddingSafeError, hashEmbeddingText, isEmbeddingManifestCompatible, sanitizeVectorMetadata, sourceChunkManifestHash } from './vector-utils.js';
+import { embeddingConfigFingerprint, formatEmbeddingSafeError, hashEmbeddingText, sanitizeVectorMetadata, sourceChunkManifestHash } from './vector-utils.js';
+import {
+  publishKnowledgeGeneration,
+  readActiveKnowledgeGeneration,
+  resolveKnowledgeGenerationFileById,
+} from './generation-store.js';
+import { loadKnowledgeChunksForEmbedding } from './vector-index-reader.js';
+export {
+  checkKnowledgeVectorCompatibility,
+  loadKnowledgeChunksForEmbedding,
+  readKnowledgeVectorManifest,
+  readKnowledgeVectorRecords,
+} from './vector-index-reader.js';
+export type {
+  KnowledgeVectorCompatibilityResult,
+  KnowledgeVectorCompatibilityStatus,
+  LoadKnowledgeChunksForEmbeddingResult,
+} from './vector-index-reader.js';
 
 export type KnowledgeEmbeddingDocumentInput = EmbeddingDocumentContract;
 export type KnowledgeEmbeddingProviderLike = EmbeddingDocumentPort;
 export type KnowledgeEmbeddingConfigLike = EmbeddingArtifactConfig;
-
-export interface LoadKnowledgeChunksForEmbeddingResult {
-  chunks: KnowledgeChunk[];
-  failures: Array<{ line: number; error: string }>;
-  chunksPath: string;
-}
 
 export interface BuildKnowledgeVectorIndexInput {
   workspaceRoot: string;
@@ -36,44 +45,16 @@ export interface BuildKnowledgeVectorIndexResult extends KnowledgeVectorBuildRep
   manifest: KnowledgeVectorManifest;
 }
 
-export type KnowledgeVectorCompatibilityStatus = 'compatible' | 'missing-index' | 'rebuild-required';
-
-export interface KnowledgeVectorCompatibilityResult {
-  status: KnowledgeVectorCompatibilityStatus;
-  mismatches: Array<'provider' | 'model' | 'dimensions' | 'distance' | 'source_chunks'>;
-  manifest?: KnowledgeVectorManifest;
-  reason?: string;
-}
-
-export function loadKnowledgeChunksForEmbedding(workspaceRoot: string): LoadKnowledgeChunksForEmbeddingResult {
-  const path = chunksPath(workspaceRoot);
-  if (!existsSync(path)) {
-    return { chunks: [], failures: [], chunksPath: path };
-  }
-
-  const chunks: KnowledgeChunk[] = [];
-  const failures: LoadKnowledgeChunksForEmbeddingResult['failures'] = [];
-  readFileSync(path, 'utf8')
-    .split(/\r?\n/)
-    .forEach((line, index) => {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        return;
-      }
-      try {
-        chunks.push(markLegacyChunk(JSON.parse(trimmed) as KnowledgeChunk));
-      } catch (error) {
-        failures.push({ line: index + 1, error: formatEmbeddingSafeError(error) });
-      }
-    });
-  return { chunks, failures, chunksPath: path };
+export interface PreparedKnowledgeVectorGeneration {
+  result: BuildKnowledgeVectorIndexResult;
+  files: Record<'vectors.jsonl' | 'vector-manifest.json' | 'vector-build-report.json', string>;
 }
 
 export function chunkToEmbeddingDocumentInput(chunk: KnowledgeChunk): KnowledgeEmbeddingDocumentInput {
   return {
     id: chunk.chunk_id,
-    text: chunk.text,
-    contentHash: chunk.text_hash ?? hashEmbeddingText(chunk.text),
+    text: chunk.retrieval_text ?? chunk.text,
+    contentHash: chunk.retrieval_text_hash ?? hashEmbeddingText(chunk.retrieval_text ?? chunk.text),
     source: chunk.source,
     documentId: chunk.parent_id,
     chunkId: chunk.chunk_id,
@@ -96,8 +77,11 @@ export function isChunkEligibleForRemoteEmbedding(chunk: KnowledgeChunk): { elig
   if (chunk.status !== 'active') {
     return { eligible: false, reason: `status_${chunk.status}` };
   }
-  if (chunk.legacy || chunk.artifact_version !== 3 || chunk.chunking_strategy !== 'parent-child-v3') {
+  if (chunk.legacy || chunk.artifact_version !== 4 || chunk.chunking_strategy !== 'parent-child-v4') {
     return { eligible: false, reason: 'legacy_chunk' };
+  }
+  if (chunk.undersized_unmergeable || chunk.manual_split_required) {
+    return { eligible: false, reason: chunk.undersized_unmergeable ? 'undersized_unmergeable' : 'manual_split_required' };
   }
   if (chunk.quality_status !== 'ok') {
     return { eligible: false, reason: `quality_${chunk.quality_status ?? 'unknown'}` };
@@ -109,19 +93,64 @@ export function isChunkEligibleForRemoteEmbedding(chunk: KnowledgeChunk): { elig
 }
 
 export async function buildKnowledgeVectorIndex(input: BuildKnowledgeVectorIndexInput): Promise<BuildKnowledgeVectorIndexResult> {
+  const activeBefore = readActiveKnowledgeGeneration(input.workspaceRoot);
+  const pinnedGenerationId = activeBefore?.generation_id;
+  const loaded = loadKnowledgeChunksForEmbedding(input.workspaceRoot, pinnedGenerationId);
+  const prepared = await prepareKnowledgeVectorGeneration({
+    ...input,
+    chunks: loaded.chunks,
+    initialFailures: loaded.failures.map((failure) => ({
+      chunkId: `line_${failure.line}`,
+      error: failure.error,
+    })),
+  });
+  const { result, files } = prepared;
+  mkdirSync(indexesDir(input.workspaceRoot), { recursive: true });
+  if (activeBefore && result.failures.length === 0) {
+    publishKnowledgeGeneration({
+      workspaceRoot: input.workspaceRoot,
+      expectedActiveGenerationId: activeBefore.generation_id,
+      mode: 'hybrid',
+      files: {
+        'chunks.jsonl': readFileSync(resolveKnowledgeGenerationFileById(
+          input.workspaceRoot,
+          'chunks.jsonl',
+          pinnedGenerationId,
+        ), 'utf8'),
+        'manifest.json': readFileSync(resolveKnowledgeGenerationFileById(
+          input.workspaceRoot,
+          'manifest.json',
+          pinnedGenerationId,
+        ), 'utf8'),
+        'keyword-index.json': readFileSync(resolveKnowledgeGenerationFileById(
+          input.workspaceRoot,
+          'keyword-index.json',
+          pinnedGenerationId,
+        ), 'utf8'),
+        ...files,
+      },
+    });
+  } else if (!activeBefore) {
+    writeFileSync(vectorsPath(input.workspaceRoot), files['vectors.jsonl'], 'utf8');
+    writeFileSync(vectorManifestPath(input.workspaceRoot), files['vector-manifest.json'], 'utf8');
+  }
+  writeFileSync(vectorBuildReportPath(input.workspaceRoot), files['vector-build-report.json'], 'utf8');
+  return result;
+}
+
+export async function prepareKnowledgeVectorGeneration(input: BuildKnowledgeVectorIndexInput & {
+  chunks: KnowledgeChunk[];
+  initialFailures?: KnowledgeVectorBuildReport['failures'];
+}): Promise<PreparedKnowledgeVectorGeneration> {
   const startedAt = Date.now();
-  const loaded = loadKnowledgeChunksForEmbedding(input.workspaceRoot);
   const generatedAt = new Date().toISOString();
   const skipped: KnowledgeVectorBuildReport['skipped'] = [];
-  const failures: KnowledgeVectorBuildReport['failures'] = loaded.failures.map((failure) => ({
-    chunkId: `line_${failure.line}`,
-    error: failure.error,
-  }));
+  const failures: KnowledgeVectorBuildReport['failures'] = [...(input.initialFailures ?? [])];
   const eligibleInputs: KnowledgeEmbeddingDocumentInput[] = [];
   const eligibleChunks: KnowledgeChunk[] = [];
 
-  for (const chunk of loaded.chunks) {
-    const textHash = hashEmbeddingText(chunk.text ?? '');
+  for (const chunk of input.chunks) {
+    const textHash = hashEmbeddingText(chunk.retrieval_text ?? chunk.text ?? '');
     const eligibility = isChunkEligibleForRemoteEmbedding(chunk);
     if (!eligibility.eligible) {
       skipped.push({ chunkId: chunk.chunk_id, textHash, reason: eligibility.reason });
@@ -151,7 +180,7 @@ export async function buildKnowledgeVectorIndex(input: BuildKnowledgeVectorIndex
             source: chunk.source,
             document_id: chunk.parent_id,
             chunk_id: chunk.chunk_id,
-            text_hash: result.contentHash ?? hashEmbeddingText(chunk.text),
+            text_hash: result.contentHash ?? hashEmbeddingText(chunk.retrieval_text ?? chunk.text),
             provider: result.provider,
             model: result.model,
             dimensions: result.dimensions,
@@ -180,7 +209,7 @@ export async function buildKnowledgeVectorIndex(input: BuildKnowledgeVectorIndex
     model: input.provider.model,
     dimensions: input.provider.dimensions,
     distance: input.provider.distance,
-    source_chunk_manifest_hash: sourceChunkManifestHash(loaded.chunks),
+    source_chunk_manifest_hash: sourceChunkManifestHash(input.chunks),
     vector_count: records.length,
     skipped_count: skipped.length,
     failed_count: failures.length,
@@ -188,9 +217,8 @@ export async function buildKnowledgeVectorIndex(input: BuildKnowledgeVectorIndex
     embedding_config_fingerprint: embeddingConfigFingerprint(input.config),
   };
 
-  mkdirSync(indexesDir(input.workspaceRoot), { recursive: true });
-  writeFileSync(vectorsPath(input.workspaceRoot), records.map((record) => JSON.stringify(record)).join('\n') + (records.length ? '\n' : ''), 'utf8');
-  writeFileSync(vectorManifestPath(input.workspaceRoot), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  const vectorContent = records.map((record) => JSON.stringify(record)).join('\n') + (records.length ? '\n' : '');
+  const vectorManifestContent = `${JSON.stringify(manifest, null, 2)}\n`;
   const report: KnowledgeVectorBuildReport = {
     version: 1,
     generatedAt,
@@ -205,65 +233,13 @@ export async function buildKnowledgeVectorIndex(input: BuildKnowledgeVectorIndex
     vectorsPath: vectorsPath(input.workspaceRoot),
     manifestPath: vectorManifestPath(input.workspaceRoot),
   };
-  writeFileSync(vectorBuildReportPath(input.workspaceRoot), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-  return { ...report, manifest };
-}
-
-export function readKnowledgeVectorManifest(workspaceRoot: string): KnowledgeVectorManifest | undefined {
-  const path = vectorManifestPath(workspaceRoot);
-  if (!existsSync(path)) {
-    return undefined;
-  }
-  return JSON.parse(readFileSync(path, 'utf8')) as KnowledgeVectorManifest;
-}
-
-export function readKnowledgeVectorRecords(workspaceRoot: string): {
-  records: KnowledgeVectorRecord[];
-  failures: Array<{ line: number; error: string }>;
-} {
-  const path = vectorsPath(workspaceRoot);
-  if (!existsSync(path)) {
-    return { records: [], failures: [] };
-  }
-  const records: KnowledgeVectorRecord[] = [];
-  const failures: Array<{ line: number; error: string }> = [];
-  readFileSync(path, 'utf8')
-    .split(/\r?\n/)
-    .forEach((line, index) => {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        return;
-      }
-      try {
-        records.push(JSON.parse(trimmed) as KnowledgeVectorRecord);
-      } catch (error) {
-        failures.push({ line: index + 1, error: formatEmbeddingSafeError(error) });
-      }
-    });
-  return { records, failures };
-}
-
-export function checkKnowledgeVectorCompatibility(input: {
-  workspaceRoot: string;
-  embeddingConfig: KnowledgeEmbeddingConfigLike;
-}): KnowledgeVectorCompatibilityResult {
-  const manifest = readKnowledgeVectorManifest(input.workspaceRoot);
-  if (!manifest || !existsSync(vectorsPath(input.workspaceRoot))) {
-    return { status: 'missing-index', mismatches: [], reason: 'vector artifacts are absent' };
-  }
-
-  const compatibility = isEmbeddingManifestCompatible(manifest, input.embeddingConfig);
-  const mismatches: KnowledgeVectorCompatibilityResult['mismatches'] = [...compatibility.mismatches];
-  const loaded = loadKnowledgeChunksForEmbedding(input.workspaceRoot);
-  const currentHash = sourceChunkManifestHash(loaded.chunks);
-  if (currentHash !== manifest.source_chunk_manifest_hash) {
-    mismatches.push('source_chunks');
-  }
-
+  const result = { ...report, manifest };
   return {
-    status: mismatches.length === 0 ? 'compatible' : 'rebuild-required',
-    mismatches,
-    manifest,
-    reason: mismatches.length === 0 ? undefined : `vector rebuild required: ${mismatches.join(', ')}`,
+    result,
+    files: {
+      'vectors.jsonl': vectorContent,
+      'vector-manifest.json': vectorManifestContent,
+      'vector-build-report.json': `${JSON.stringify(report, null, 2)}\n`,
+    },
   };
 }

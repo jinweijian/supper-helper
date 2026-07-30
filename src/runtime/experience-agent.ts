@@ -1,6 +1,7 @@
 import type { AnswerGoal, DiagnosticResult, DiagnosticRun, Evidence, UserPersona } from '../domain.js';
 import type { CaseRepository, StoredCase } from '../sessions/case-repository.js';
-import { validateDiagnosticResult } from './result-validator.js';
+import { validateDiagnosticStructure } from './result-validator.js';
+import type { CoverageEvidenceEnvelope } from './coverage-evidence-provenance.js';
 
 export interface ExperienceMatch {
   sourceCaseId: string;
@@ -11,6 +12,20 @@ export interface ExperienceMatch {
   reply: string;
   score: number;
   result: DiagnosticResult;
+  coverageEvidenceEnvelopes: CoverageEvidenceEnvelope[];
+}
+
+export interface ResolvedExperienceEvidence {
+  evidence: Evidence;
+  coverageEvidenceEnvelope: CoverageEvidenceEnvelope;
+}
+
+export interface ExperienceCurrentEvidenceResolver {
+  resolve(input: {
+    evidence: Evidence;
+    sourceRun: DiagnosticRun;
+    currentCase: StoredCase;
+  }): ResolvedExperienceEvidence | undefined;
 }
 
 export interface RejectedExperienceCandidate {
@@ -27,6 +42,7 @@ export function findExperienceMatch(input: {
   currentCase: StoredCase;
   userMessage: string;
   answerGoal?: AnswerGoal;
+  currentEvidenceResolver?: ExperienceCurrentEvidenceResolver;
 }): ExperienceMatch | undefined {
   const normalized = normalizeQuestion(input.userMessage);
   if (normalized.length < 6) return undefined;
@@ -37,7 +53,13 @@ export function findExperienceMatch(input: {
     .filter((caseSession) => caseSession.tenantId === input.currentCase.tenantId)
     .filter((caseSession) => caseSession.userId === input.currentCase.userId)
     .filter((caseSession) => caseSession.workspaceId === input.currentCase.workspaceId)
-    .flatMap((caseSession) => pairsFromCase(caseSession, input.currentCase.userPersona, normalized, input.answerGoal))
+    .flatMap((caseSession) => pairsFromCase(
+      caseSession,
+      input.currentCase,
+      normalized,
+      input.answerGoal,
+      input.currentEvidenceResolver,
+    ))
     .sort((left, right) => right.score - left.score)[0];
 }
 
@@ -46,6 +68,7 @@ export function findRejectedExperienceCandidates(input: {
   currentCase: StoredCase;
   userMessage: string;
   answerGoal?: AnswerGoal;
+  currentEvidenceResolver?: ExperienceCurrentEvidenceResolver;
 }): RejectedExperienceCandidate[] {
   const normalized = normalizeQuestion(input.userMessage);
   if (normalized.length < 6) return [];
@@ -73,7 +96,12 @@ export function findRejectedExperienceCandidates(input: {
       }
       const sourceRun = findSourceRun(caseSession.runs, message.id, message.body);
       const rejectionReason = sourceRun
-        ? reusabilityIssue(sourceRun, input.currentCase.userPersona, input.answerGoal)
+        ? reusabilityIssue(
+            sourceRun,
+            input.currentCase,
+            input.answerGoal,
+            input.currentEvidenceResolver,
+          ).reason
         : 'run_not_attributable';
       if (rejectionReason) {
         candidates.push({
@@ -92,9 +120,10 @@ export function findRejectedExperienceCandidates(input: {
 
 function pairsFromCase(
   caseSession: StoredCase,
-  persona: UserPersona,
+  currentCase: StoredCase,
   normalizedQuestion: string,
   answerGoal?: AnswerGoal,
+  currentEvidenceResolver?: ExperienceCurrentEvidenceResolver,
 ): ExperienceMatch[] {
   const matches: ExperienceMatch[] = [];
   for (const message of caseSession.messages) {
@@ -106,8 +135,14 @@ function pairsFromCase(
     ));
     if (!reply) continue;
     const sourceRun = findSourceRun(caseSession.runs, message.id, message.body);
-    if (!sourceRun?.result || !isReusableRun(sourceRun, persona, answerGoal)) continue;
-    const evidence = sourceRun.result.evidence.slice(0, 6);
+    if (!sourceRun?.result) continue;
+    const reusable = reusabilityIssue(
+      sourceRun,
+      currentCase,
+      answerGoal,
+      currentEvidenceResolver,
+    );
+    if (reusable.reason || !reusable.result) continue;
     matches.push({
       sourceCaseId: caseSession.id,
       sourceMessageId: message.id,
@@ -116,46 +151,8 @@ function pairsFromCase(
       question: message.body,
       reply: reply.body,
       score,
-      result: {
-        status: 'concluded',
-        summary: `历史经验命中：${reply.body.slice(0, 240)}`,
-        missingInfo: [],
-        evidence: [
-          {
-            id: 'ev_history_match',
-            kind: 'history',
-            source: `${caseSession.id}/${message.id}/${sourceRun.id}`,
-            summary: `历史会话中存在已验证的同问题回复，匹配分 ${score.toFixed(2)}。`,
-            confidence: score >= 0.98 ? 'high' : 'medium',
-            validation: {
-              status: 'active',
-              visibility: 'customer_safe',
-              lastVerifiedAt: new Date().toISOString(),
-              quality: 'ok',
-            },
-          },
-          ...evidence.filter((item) => item.id !== 'ev_history_match'),
-        ],
-        claims: [
-          {
-            id: 'claim_history_reply',
-            type: 'inference',
-            role: 'primary_answer',
-            text: reply.body,
-            evidenceIds: evidence.map((item) => item.id),
-            answers: answerGoal?.mustAnswerItems ?? ['direct_answer'],
-          },
-          {
-            id: 'claim_history_match',
-            type: 'fact',
-            role: 'supporting_context',
-            text: `历史会话 ${caseSession.id} 的 run ${sourceRun.id} 已回答高度相同的问题。`,
-            evidenceIds: ['ev_history_match'],
-            answers: [],
-          },
-        ],
-        recommendedNextAction: 'final_answer',
-      },
+      result: reusable.result,
+      coverageEvidenceEnvelopes: reusable.coverageEvidenceEnvelopes ?? [],
     });
   }
   return matches;
@@ -174,31 +171,75 @@ function findSourceRun(runs: DiagnosticRun[], sourceMessageId: string, question:
   return legacyMatches.length === 1 ? legacyMatches[0] : undefined;
 }
 
-function isReusableRun(run: DiagnosticRun, persona: UserPersona, answerGoal?: AnswerGoal): boolean {
-  return reusabilityIssue(run, persona, answerGoal) === undefined;
-}
-
-function reusabilityIssue(run: DiagnosticRun, persona: UserPersona, answerGoal?: AnswerGoal): string | undefined {
+function reusabilityIssue(
+  run: DiagnosticRun,
+  currentCase: StoredCase,
+  answerGoal?: AnswerGoal,
+  currentEvidenceResolver?: ExperienceCurrentEvidenceResolver,
+): { reason?: string; result?: DiagnosticResult; coverageEvidenceEnvelopes?: CoverageEvidenceEnvelope[] } {
   const result = run.result;
   if (!result || run.status !== 'concluded' || result.status !== 'concluded' || result.recommendedNextAction !== 'final_answer') {
-    return 'run_not_final';
+    return { reason: 'run_not_final' };
   }
-  if (result.evidence.length === 0) return 'evidence_missing';
-  if (result.evidence.some((evidence) => !isReusableEvidence(evidence, persona))) {
-    return 'evidence_not_current_or_visible';
+  if (!answerGoal || !run.request?.answerGoal) return { reason: 'answer_goal_unavailable' };
+  if (!hasExactExperienceAnswerGoal(answerGoal, run.request.answerGoal)) {
+    return { reason: 'answer_goal_not_exact' };
   }
-  const validation = validateDiagnosticResult(result, answerGoal ?? run.request?.answerGoal);
+  if (result.evidence.length === 0) return { reason: 'evidence_missing' };
+  if (!currentEvidenceResolver) return { reason: 'current_evidence_resolver_unavailable' };
+  const resolvedEvidence = result.evidence.map((evidence) => (
+    currentEvidenceResolver.resolve({ evidence, sourceRun: run, currentCase })
+  ));
   if (
-    answerGoal &&
-    validation.acceptedPrimaryAnswerClaimIds.length === 0 &&
-    validation.issues.every((issue) => issue.code === 'missing_primary_answer')
+    resolvedEvidence.some((item) => !item) ||
+    resolvedEvidence.some((item) => !isReusableEvidence(item!.evidence, currentCase.userPersona))
   ) {
-    return 'answer_goal_not_covered';
+    return { reason: 'evidence_not_current_or_visible' };
   }
-  if (validation.issues.length > 0 || validation.result.status !== 'concluded' || validation.result.recommendedNextAction !== 'final_answer') {
-    return 'strict_review_failed';
+  const currentEvidence = resolvedEvidence.map((item) => item!.evidence);
+  const revalidatedResult: DiagnosticResult = {
+    ...result,
+    evidence: currentEvidence as Evidence[],
+    claims: result.claims.map((claim) => ({
+      ...claim,
+      evidenceIds: [...claim.evidenceIds],
+      answers: [...claim.answers],
+    })),
+    missingInfo: [...result.missingInfo],
+  };
+  const validation = validateDiagnosticStructure(revalidatedResult, answerGoal);
+  const acceptedPrimary = validation.result.claims.filter((claim) => claim.role === 'primary_answer');
+  if (acceptedPrimary.length === 0) {
+    return { reason: 'answer_goal_not_covered' };
   }
-  return undefined;
+  if (
+    validation.issues.length > 0 ||
+    validation.globalBlockers.length > 0 ||
+    validation.result.status !== 'concluded' ||
+    validation.result.recommendedNextAction !== 'final_answer'
+  ) {
+    return { reason: 'strict_review_failed' };
+  }
+  return {
+    result: revalidatedResult,
+    coverageEvidenceEnvelopes: resolvedEvidence.map((item) => item!.coverageEvidenceEnvelope),
+  };
+}
+
+export function hasExactExperienceAnswerGoal(current: AnswerGoal, source: AnswerGoal): boolean {
+  if (
+    normalizeGoalText(current.resolvedQuestion) !== normalizeGoalText(source.resolvedQuestion) ||
+    normalizeGoalText(current.answerObject) !== normalizeGoalText(source.answerObject)
+  ) {
+    return false;
+  }
+  const currentItems = normalizedItemSet(current.mustAnswerItems);
+  const sourceItems = normalizedItemSet(source.mustAnswerItems);
+  return (
+    currentItems.length > 0 &&
+    currentItems.length === sourceItems.length &&
+    currentItems.every((item, index) => item === sourceItems[index])
+  );
 }
 
 function isReusableEvidence(evidence: Evidence, persona: UserPersona): boolean {
@@ -222,6 +263,14 @@ function visibilityForPersona(persona: UserPersona): Array<NonNullable<Evidence[
 
 function normalizeQuestion(value: string): string {
   return value.toLowerCase().replace(/[，。！？、,.!?;:：；"'`~\s]/g, '').trim();
+}
+
+function normalizeGoalText(value: string): string {
+  return value.normalize('NFKC').replace(/\s+/g, ' ').trim();
+}
+
+function normalizedItemSet(items: string[]): string[] {
+  return Array.from(new Set(items.map(normalizeGoalText).filter(Boolean))).sort();
 }
 
 function similarity(a: string, b: string): number {

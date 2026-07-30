@@ -83,7 +83,7 @@ function validateRagAnswerability(
 
   const selectedEvidenceIds = safeStringArray(parsed.selectedEvidenceIds);
   const missingElements = safeStringArray(parsed.missingElements);
-  const coveredClaims = safeClaims(parsed.coveredClaims);
+  const coveredClaims = safeClaims(parsed.coveredClaims, answerGoal);
   const allEvidenceIds = new Set([
     ...selectedEvidenceIds,
     ...coveredClaims.flatMap((claim) => claim.evidenceIds),
@@ -152,7 +152,7 @@ function safeStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
-function safeClaims(value: unknown): RagCoveredClaim[] {
+function safeClaims(value: unknown, answerGoal: AnswerGoal): RagCoveredClaim[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
     if (!item || typeof item !== 'object') return [];
@@ -162,7 +162,9 @@ function safeClaims(value: unknown): RagCoveredClaim[] {
       id: candidate.id,
       text: candidate.text,
       evidenceIds: safeStringArray(candidate.evidenceIds),
-      coveredRequirementIds: safeStringArray(candidate.coveredRequirementIds),
+      coveredRequirementIds: answerGoal.mustAnswerItems.filter((item) => (
+        safeStringArray(candidate.coveredRequirementIds).includes(item)
+      )),
       usefulness: typeof candidate.usefulness === 'string' ? candidate.usefulness : '',
     }];
   });

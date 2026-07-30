@@ -20,6 +20,21 @@ export {
 } from './indexes/chunks.js';
 export type { ReadKnowledgeChunksResult } from './indexes/chunks.js';
 export {
+  activeGenerationPointerPath,
+  createFileKnowledgeGenerationPublisher,
+  publishKnowledgeGeneration,
+  readActiveKnowledgeGeneration,
+  resolveKnowledgeGenerationFile,
+  KnowledgeGenerationConflictError,
+  recoverStaleKnowledgeGenerationLock,
+  rollbackKnowledgeGeneration,
+} from './generation-store.js';
+export type {
+  KnowledgeGenerationManifest,
+  KnowledgeGenerationPointer,
+  KnowledgeGenerationPublisherPort,
+} from './generation-store.js';
+export {
   readKnowledgeKeywordIndex,
   writeKnowledgeKeywordIndex,
 } from './indexes/keyword-index.js';

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { defaultConfig, loadConfig, saveConfig } from '../dist/config.js';
+import { chunksPath, manifestPath, vectorManifestPath } from '../dist/knowledge/paths.js';
 import {
   FileOnboardingDraftRepository,
   FileOnboardingRunRepository,
@@ -712,9 +713,9 @@ test('one dashboard run configures providers, publishes clean knowledge, and com
     const configJson = readFileSync(fixture.configPath, 'utf8');
     assert.equal(JSON.parse(configJson).onboarding.lastRunId, run.id);
     assert.doesNotMatch(configJson, /fixture-secret/);
-    assert.equal(existsSync(join(fixture.knowledgeWorkspace, 'knowledge', 'indexes', 'manifest.json')), true);
-    assert.equal(existsSync(join(fixture.knowledgeWorkspace, 'knowledge', 'indexes', 'chunks.jsonl')), true);
-    assert.equal(existsSync(join(fixture.knowledgeWorkspace, 'knowledge', 'indexes', 'vector-manifest.json')), true);
+    assert.equal(existsSync(manifestPath(fixture.knowledgeWorkspace)), true);
+    assert.equal(existsSync(chunksPath(fixture.knowledgeWorkspace)), true);
+    assert.equal(existsSync(vectorManifestPath(fixture.knowledgeWorkspace)), true);
   } finally {
     await fixture.close();
   }

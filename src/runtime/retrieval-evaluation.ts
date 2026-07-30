@@ -22,6 +22,19 @@ export interface RuntimeRetrievalEvaluationQuestion {
   category?: 'exact' | 'paraphrase' | 'generic' | 'no_hit' | 'implementation_risk' | 'visibility_stale_conflict';
 }
 
+export interface RuntimeRetrievalCoverageReview {
+  fullQuestion: 'full' | 'partial' | 'none' | 'unknown';
+  missingElements: string[];
+}
+
+export interface RuntimeRetrievalCoverageReviewer {
+  review(input: {
+    questionId: string;
+    resolvedQuestion: string;
+    evidenceSegments: Array<{ id: string; text: string }>;
+  }): Promise<RuntimeRetrievalCoverageReview>;
+}
+
 export interface RuntimeRetrievalEvaluationThresholds {
   recallAt5: number;
   mrr: number;
@@ -84,6 +97,7 @@ export async function runRuntimeRetrievalEvaluation(input: {
   questions: RuntimeRetrievalEvaluationQuestion[];
   thresholds?: Partial<RuntimeRetrievalEvaluationThresholds>;
   reportPath?: string;
+  coverageReviewer?: RuntimeRetrievalCoverageReviewer;
 }): Promise<RuntimeRetrievalEvaluationReport> {
   const thresholds = { ...DEFAULT_THRESHOLDS, ...(input.thresholds ?? {}) };
   const failures: RuntimeRetrievalEvaluationReport['failures'] = [];
@@ -98,22 +112,50 @@ export async function runRuntimeRetrievalEvaluation(input: {
     const rank = question.expectedParentId
       ? diagnosis.evidencePack.results.findIndex((result) => result.parent_id === question.expectedParentId) + 1
       : 0;
+    const coverageReview = input.coverageReviewer && diagnosis.judge.answerable
+      ? await input.coverageReviewer.review({
+          questionId: question.id,
+          resolvedQuestion: question.question,
+          evidenceSegments: diagnosis.evidencePack.results.flatMap((result) => {
+            const text = result.answer_span?.trim();
+            return text && Array.from(text).length <= 500
+              ? [{ id: result.evidence_id, text }]
+              : [];
+          }),
+        })
+      : undefined;
+    const coverageAccepted = !coverageReview || (
+      coverageReview.fullQuestion === 'full' &&
+      coverageReview.missingElements.length === 0
+    );
+    const answerable = diagnosis.judge.answerable && coverageAccepted;
+    const recommendedAction = answerable
+      ? diagnosis.judge.recommended_next_action
+      : diagnosis.judge.answerable && coverageReview
+        ? 'dispatch_code_diagnosis'
+        : diagnosis.judge.recommended_next_action;
     const parentRank = rank > 0 ? rank : undefined;
     const correctDirectAnswer = (
       question.expectedBehavior === 'direct' &&
-      diagnosis.judge.answerable &&
+      answerable &&
       (!question.expectedParentId || parentRank === 1)
     );
-    const correctAbstention = question.expectedBehavior === 'abstain' && !diagnosis.judge.answerable;
+    const correctAbstention = question.expectedBehavior === 'abstain' && !answerable;
     const correctEscalation = (
       question.expectedBehavior === 'escalate' &&
-      !diagnosis.judge.answerable &&
-      diagnosis.judge.recommended_next_action !== 'final_answer'
+      !answerable &&
+      recommendedAction !== 'final_answer'
     );
     const retrievalPassed = !question.expectedParentId || (parentRank !== undefined && parentRank <= 5);
     const behaviorPassed = correctDirectAnswer || correctAbstention || correctEscalation;
     const passed = retrievalPassed && behaviorPassed;
-    const answerability = deriveAnswerability(diagnosis);
+    const answerability = coverageReview
+      ? {
+          answerability: coverageReview.fullQuestion,
+          missingElements: [...coverageReview.missingElements],
+          coveredClaimCount: coverageReview.fullQuestion === 'none' ? 0 : diagnosis.judge.evidence.length,
+        }
+      : deriveAnswerability(diagnosis);
 
     if (!retrievalPassed) {
       failures.push({
@@ -124,7 +166,7 @@ export async function runRuntimeRetrievalEvaluation(input: {
     } else if (!behaviorPassed) {
       failures.push({
         questionId: question.id,
-        reason: `expected ${question.expectedBehavior}, got ${diagnosis.judge.recommended_next_action}`,
+        reason: `expected ${question.expectedBehavior}, got ${recommendedAction}`,
         attribution: 'evidence_judge',
       });
     }
@@ -141,9 +183,12 @@ export async function runRuntimeRetrievalEvaluation(input: {
       missingElements: answerability.missingElements,
       coveredClaimCount: answerability.coveredClaimCount,
       parentRank,
-      answerable: diagnosis.judge.answerable,
-      recommendedAction: diagnosis.judge.recommended_next_action,
-      blockers: [...diagnosis.judge.blockers],
+      answerable,
+      recommendedAction,
+      blockers: [
+        ...diagnosis.judge.blockers,
+        ...(!coverageAccepted ? ['independent_coverage_incomplete'] : []),
+      ],
       topEvidence: top ? {
         evidenceId: top.evidence_id,
         parentId: top.parent_id,

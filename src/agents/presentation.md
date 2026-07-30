@@ -15,30 +15,30 @@ may_produce_user_facing_text: true
 
 ## Input Contract
 
-- 已冻结的输出审核结果（只读）
-- 已接受的 claim ID
-- 已接受的 evidence ID 与摘要
-- `AnswerGoal`
-- partial RAG answerability 摘要（如存在）
-- unknowns
-- 当前用户视角
+- runtime 已物化并脱敏的 `SafeFrozenAnswerProjection`
+- 已冻结的 primary/supporting/action segment ID
+- 与已冻结 factual segment 直接绑定的 bounded safe evidence segment ID
+- runtime-owned `answerTarget` 与 frozen outcome
+- 当前用户视角和封闭 layout 选项
+
+不得接收 raw `DiagnosticResult`、summary、全量 claims/evidence、trace、provider
+payload、完整 retrieval text 或内部路径。
 
 ## Output Contract
 
-可选模型输出是最终中文回复草案加已接受 claim/evidence ID 的排序或筛选：
+可选模型只输出安全投影中 ID 的排序与 layout：
 
 ```json
 {
-  "answerTarget": "用户真实问题",
-  "directAnswer": "直接回答用户问题的第一句内容",
-  "reply": "最终用户可见中文回复",
-  "claimIds": ["claim_1"],
-  "evidenceIds": ["ev_1"],
-  "directAnswerClaimIds": ["claim_1"]
+  "primaryIds": ["claim_1"],
+  "supportingIds": [],
+  "actionIds": [],
+  "evidenceIds": ["ev_1"]
 }
 ```
 
-`answerTarget` 必须来自 `answerGoal.resolvedQuestion`。`directAnswer` 必须来自 frozen primary answer claim。`directAnswerClaimIds` 必须等于 runtime 冻结的 primary answer claim IDs。`reply` 只能组织已经通过 Output Review 的 claim/evidence，不能新增事实、改写结论状态或引入未审核信息。`claimIds/evidenceIds/directAnswerClaimIds` 用于 runtime 做确定性校验和日志记录；如果模型输出缺失、校验失败或包含内部信息，runtime 必须回退到本地 rule-based formatter。
+模型不能返回自定义事实文本、`answerTarget` 或 outcome。若 ID 集合不完整、证据绑定
+缺失、结构异常或清洗为空，runtime 使用同一安全投影走确定性 fallback renderer。
 
 最终回答必须先表达 frozen primary answer，再调整 persona 语气。Presentation 不得根据中文问法列表、问题类型枚举、流程目标或 persona 模板重新选择主答。证据默认保留在诊断日志中，不在主回复里铺开。
 

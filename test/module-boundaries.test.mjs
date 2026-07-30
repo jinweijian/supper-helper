@@ -213,6 +213,69 @@ test('knowledge CLI is a thin dispatcher with focused handler modules', () => {
   }
 });
 
+test('knowledge rebuild orchestration stays in application and artifact IO stays in knowledge', () => {
+  const application = join(srcRoot, 'application', 'knowledge-rebuild-service.ts');
+  const cliAndOnboarding = [
+    ...tsFilesUnder(join(srcRoot, 'cli', 'knowledge')),
+    join(srcRoot, 'onboarding', 'knowledge-pipeline.ts'),
+    join(srcRoot, 'onboarding', 'review-service.ts'),
+  ];
+  assertNoImportPattern(
+    [application],
+    [
+      /from\s+['"]node:(?:fs|path)['"]/,
+      /\bactive\.json\b/,
+      /\bgeneration-publish\.lock\b/,
+      /\bwriteFileSync\b/,
+      /\brenameSync\b/,
+    ],
+    'application may orchestrate publisher ports but must not operate lock, manifest, pointer, or artifact files',
+  );
+  assertNoImportPattern(
+    cliAndOnboarding,
+    [
+      /generation-store/,
+      /\bpublishKnowledgeGeneration\b/,
+      /\brollbackKnowledgeGeneration\b/,
+      /\bbuildKnowledgeVectorIndex\b/,
+      /\bupdateKnowledgeIndex\b/,
+    ],
+    'CLI and onboarding must call the application rebuild use case instead of artifact builders or publisher IO',
+  );
+});
+
+test('normal retrieval modules cannot write or publish knowledge artifacts', () => {
+  assertNoImportPattern(
+    tsFilesUnder(join(srcRoot, 'retrieval')),
+    [
+      /\bwriteFileSync\b/,
+      /\brenameSync\b/,
+      /\bpublishKnowledgeGeneration\b/,
+      /\brollbackKnowledgeGeneration\b/,
+      /\brecoverStaleKnowledgeGenerationLock\b/,
+    ],
+    'retrieval is read-only and must never rebuild, publish, roll back, or recover generations',
+  );
+});
+
+test('answer completeness and preflight readiness contain no business-question keyword classifier', () => {
+  assertNoImportPattern(
+    [
+      join(srcRoot, 'runtime', 'preflight-decision.ts'),
+      join(srcRoot, 'runtime', 'answer-goal-reconciliation.ts'),
+      join(srcRoot, 'runtime', 'answer-goal-completeness-review-service.ts'),
+    ],
+    [
+      /如何\|怎么\|怎样/,
+      /多久\|哪里\|在哪/,
+      /删除\|清空\|修改/,
+      /\bANSWER_BEARING_PATTERNS\b/,
+      /\bGENERIC_KEYWORDS\b/,
+    ],
+    'readiness and answer completeness must use structured review and provenance, not business-language keyword pairing',
+  );
+});
+
 test('production source does not import the legacy embedding facade', () => {
   const productionFiles = tsFilesUnder(srcRoot).filter((path) => {
     const relative = relativeSource(path);

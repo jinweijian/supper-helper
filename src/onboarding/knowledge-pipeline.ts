@@ -2,19 +2,17 @@ import { createEmbeddingProvider } from '../providers/embedding/factory.js';
 import {
   approveQualityCleanDraftSlices,
   auditKnowledgeQuality,
-  buildKnowledgeVectorIndex,
   buildDraftSlices,
-  checkKnowledgeVectorCompatibility,
   discoverSourceFiles,
   extractSourceBlocks,
   initKnowledgeWorkspace,
   intakeSourceDocument,
   normalizeSourceBlocks,
   publishApprovedDraftSlices,
-  updateKnowledgeIndex,
   writeKnowledgeQualityReport,
   writeSourceQualityReport,
 } from '../knowledge/index.js';
+import { rebuildKnowledgeArtifacts } from '../application/knowledge-rebuild-service.js';
 import type { OnboardingDraft, OnboardingStageId } from './types.js';
 import { providerHasExecutionCredentials } from './provider-credentials.js';
 
@@ -124,10 +122,31 @@ export async function runOnboardingKnowledgePipeline(input: {
     message: `Published ${publish.publishedIds.length}/${approval.approvedIds.length} quality-clean draft slices`,
   });
 
-  const index = updateKnowledgeIndex({
+  const vectorEnabled = input.draft.knowledge.buildVectorIndex
+    && input.draft.embedding.enabled
+    && providerHasExecutionCredentials(input.draft.embedding);
+  const rebuilt = await rebuildKnowledgeArtifacts({
     workspaceRoot: input.workspaceRoot,
     chunking: input.draft.knowledge.chunking,
+    ...(vectorEnabled
+      ? {
+          embedding: {
+            enabled: true,
+            provider: createEmbeddingProvider(input.draft.embedding),
+            config: input.draft.embedding,
+          },
+          onVectorProgress: (progress: { processed: number; total: number }) => {
+            input.report({
+              stage: 'build_vector_index',
+              processed: progress.processed,
+              total: progress.total,
+              message: `Built vector batch ${progress.processed}/${progress.total}`,
+            });
+          },
+        }
+      : {}),
   });
+  const index = rebuilt.index;
   input.report({
     stage: 'build_keyword_index',
     processed: index.chunkCount,
@@ -135,7 +154,15 @@ export async function runOnboardingKnowledgePipeline(input: {
     message: `Indexed ${index.documentCount} documents and ${index.chunkCount} chunks`,
   });
 
-  const vectorCount = await maybeBuildVectorIndex(input);
+  const vectorCount = rebuilt.vector?.vectorCount ?? 0;
+  if (!vectorEnabled) {
+    input.report({
+      stage: 'build_vector_index',
+      processed: 0,
+      total: 0,
+      message: 'Vector index skipped: embedding disabled, not requested, or credentials unavailable',
+    });
+  }
 
   return {
     sources: total,
@@ -150,62 +177,6 @@ export async function runOnboardingKnowledgePipeline(input: {
     indexedChunks: index.chunkCount,
     vectorCount,
   };
-}
-
-async function maybeBuildVectorIndex(input: {
-  draft: OnboardingDraft;
-  workspaceRoot: string;
-  report(progress: KnowledgeStageProgress): void;
-}): Promise<number> {
-  if (!input.draft.knowledge.buildVectorIndex || !input.draft.embedding.enabled) {
-    input.report({
-      stage: 'build_vector_index',
-      processed: 0,
-      total: 0,
-      message: 'Vector index skipped: embedding disabled or vector build not requested',
-    });
-    return 0;
-  }
-  if (!providerHasExecutionCredentials(input.draft.embedding)) {
-    input.report({
-      stage: 'build_vector_index',
-      processed: 0,
-      total: 0,
-      message: 'Vector index skipped: embedding credentials unavailable',
-    });
-    return 0;
-  }
-
-  const compatibility = checkKnowledgeVectorCompatibility({
-    workspaceRoot: input.workspaceRoot,
-    embeddingConfig: input.draft.embedding,
-  });
-  if (compatibility.status === 'compatible') {
-    const vectorCount = compatibility.manifest?.vector_count ?? 0;
-    input.report({
-      stage: 'build_vector_index',
-      processed: vectorCount,
-      total: vectorCount,
-      message: 'Vector index skipped: existing artifacts are compatible',
-    });
-    return vectorCount;
-  }
-
-  const provider = createEmbeddingProvider(input.draft.embedding);
-  const result = await buildKnowledgeVectorIndex({
-    workspaceRoot: input.workspaceRoot,
-    provider,
-    config: input.draft.embedding,
-    onProgress: (progress) => {
-      input.report({
-        stage: 'build_vector_index',
-        processed: progress.processed,
-        total: progress.total,
-        message: `Built vector batch ${progress.processed}/${progress.total}`,
-      });
-    },
-  });
-  return result.vectorCount;
 }
 
 function stageProgress(

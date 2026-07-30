@@ -1,10 +1,9 @@
 import { createEmbeddingProvider } from '../providers/embedding/factory.js';
 import {
-  buildKnowledgeVectorIndex,
   publishApprovedDraftSlices,
   reviewDraftSlices,
-  updateKnowledgeIndex,
 } from '../knowledge/index.js';
+import { rebuildKnowledgeArtifacts } from '../application/knowledge-rebuild-service.js';
 import type { FileOnboardingDraftRepository } from './draft-repository.js';
 import { providerHasExecutionCredentials } from './provider-credentials.js';
 import { buildReviewState, emptyReviewState } from './review-state.js';
@@ -60,17 +59,27 @@ export class OnboardingReviewService {
     query?: OnboardingReviewQuery,
   ): Promise<OnboardingReviewResult> {
     const publish = publishApprovedDraftSlices({ workspaceRoot, qualityGate: 'warn' });
-    const index = updateKnowledgeIndex({ workspaceRoot, chunking: draft.knowledge.chunking });
-    let vectorCount: number | undefined;
-    if (draft.knowledge.buildVectorIndex && draft.embedding.enabled && providerHasExecutionCredentials(draft.embedding)) {
-      const executionDraft = this.dependencies.secrets.materializeDraft(draft);
-      const vector = await buildKnowledgeVectorIndex({
-        workspaceRoot,
-        provider: createEmbeddingProvider(executionDraft.embedding),
-        config: executionDraft.embedding,
-      });
-      vectorCount = vector.vectorCount;
-    }
+    const vectorEnabled = draft.knowledge.buildVectorIndex
+      && draft.embedding.enabled
+      && providerHasExecutionCredentials(draft.embedding);
+    const executionDraft = vectorEnabled
+      ? this.dependencies.secrets.materializeDraft(draft)
+      : undefined;
+    const rebuilt = await rebuildKnowledgeArtifacts({
+      workspaceRoot,
+      chunking: draft.knowledge.chunking,
+      ...(executionDraft
+        ? {
+            embedding: {
+              enabled: true,
+              provider: createEmbeddingProvider(executionDraft.embedding),
+              config: executionDraft.embedding,
+            },
+          }
+        : {}),
+    });
+    const index = rebuilt.index;
+    const vectorCount = rebuilt.vector?.vectorCount;
     const review = buildReviewState({ workspaceRoot, query });
     this.updateLatestRun({
       pendingReviewSlices: review.pendingCount,

@@ -1,8 +1,8 @@
 import {
   defaultSourceDirectory,
   initKnowledgeWorkspace,
-  updateKnowledgeIndexWithQuality,
 } from '../../knowledge/index.js';
+import { rebuildKnowledgeArtifactsWithQuality } from '../../application/knowledge-rebuild-service.js';
 import { hasFlag, readOption } from '../args.js';
 import type { KnowledgeCommandContext } from './context.js';
 import { readQualityGateArg } from './context.js';
@@ -49,11 +49,12 @@ export async function runKnowledgeWorkspaceCommand(
 
   if (subcommand === 'update') {
     const gate = readQualityGateArg(argv, 'warn');
-    const result = updateKnowledgeIndexWithQuality({
+    const rebuilt = await rebuildKnowledgeArtifactsWithQuality({
       workspaceRoot,
       qualityGate: gate,
       chunking: context.config.knowledge.chunking,
     });
+    const result = rebuilt.index;
     console.log('knowledge index updated');
     console.log(`workspace: ${context.projectWorkspaceRoot}`);
     console.log(`knowledge workspace: ${workspaceRoot}`);

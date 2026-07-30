@@ -11,6 +11,7 @@ export function sourceChunkManifestHash(chunks: KnowledgeChunk[]): string {
       parent_id: chunk.parent_id,
       child_order: chunk.child_order,
       text_hash: chunk.text_hash ?? hashEmbeddingText(chunk.text ?? ''),
+      retrieval_text_hash: chunk.retrieval_text_hash ?? hashEmbeddingText(chunk.retrieval_text ?? chunk.text ?? ''),
       source_block_ids: chunk.source_block_ids ?? [],
       section_path: chunk.section_path ?? [],
       chunking_strategy: chunk.chunking_strategy,

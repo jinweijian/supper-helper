@@ -59,23 +59,6 @@ const sourceAuthority: Record<string, number> = {
   unresolved_case: 0.25,
 };
 
-const GENERIC_KEYWORDS = ['课程', '配置', '功能', '怎么', '支持', '使用', '如何', '哪里', '什么', '帮助', '介绍', '说明', '推荐'];
-const ANSWER_BEARING_PATTERNS = [
-  /(当|如果|若|在).{2,30}(时|情况|条件下|之后)/,
-  /步骤[一二三四五六七八九十0-9]+/,
-  /[一二三四五六七八九十0-9]+[\.、]/,
-  /(支持|不支持|会|不会|需要|必须|返回|提示|提醒|开通|关闭|开启|启用)/,
-  /(会|不会).{0,20}(提醒|提示|开通|触发|记录|通知|发送)/,
-  /学习日.{0,15}(提醒|未完成|任务)/,
-  /(search|搜索).{0,20}(按|根据|通过|支持)/i,
-  // Chinese rule/condition patterns
-  /(包含|包括).{0,30}(任务|时长|时间|内容|状态|字段)/,
-  /(可以通过|可通过|可以|能).{0,20}(查看|操作|设置|管理|发送|搜索|学习|提醒|添加|删除|修改)/,
-  /学员|教师|管理员|用户|订单|课程|班级|任务|学习|计划/,
-  /[一二三四五六七八九十]+[、.]/,
-  /(支持|不支持|会|不会|需要|必须|返回|提示|提醒|开通|关闭|开启|启用).{0,40}(功能|操作|行为|动作)/,
-];
-
 export function judgeKnowledgeEvidence(input: {
   route: KnowledgeRoute;
   evidencePack: KnowledgeEvidencePack;
@@ -132,16 +115,8 @@ export function judgeKnowledgeEvidence(input: {
   const answerScore = scoreFromBreakdown(breakdown);
   const normalizedScore = Math.max(0, Math.min(1, answerScore));
 
-  // Generic keyword false-positive control
-  const matchedGeneric = input.route.keywords.filter((kw) => GENERIC_KEYWORDS.includes(kw));
   const topMatchedTerms = results[0]?.matched_terms ?? [];
-  const topNonGenericTerms = topMatchedTerms.filter((term) => isSpecificTerm(term));
-  const answerCoverage = evaluateQuestionAnswerCoverage(input.question, results);
-  const missingAnswerRequirements = answerCoverage.missing.map((requirement) => requirement.label);
-  if (matchedGeneric.length >= 1 && results[0] && (topMatchedTerms.length < 2 || topNonGenericTerms.length === 0)) {
-    blockers.push('generic_keyword_only');
-    ambiguity.push(`仅泛词命中：${matchedGeneric.join('、')}`);
-  }
+  const topSpecificTerms = topMatchedTerms.filter((term) => Array.from(term.trim()).length >= 2);
 
   // Module mismatch detection
   if (input.route.moduleCandidates.length > 0 && results[0] && !input.route.moduleCandidates.includes(results[0].module)) {
@@ -154,7 +129,7 @@ export function judgeKnowledgeEvidence(input: {
   const top = results[0];
 
   // Direct answers require an explicit span selected from the canonical parent.
-  if (top && (!top.answer_span || !hasAnswerBearingSentence(top.answer_span))) {
+  if (top && (!top.answer_span || !hasBoundedAnswerSpan(top.answer_span))) {
     blockers.push('missing_answer_bearing_sentence');
   }
 
@@ -170,17 +145,12 @@ export function judgeKnowledgeEvidence(input: {
     blockers.push('missing_provenance');
   }
 
-  if (top && topNonGenericTerms.length < 2) {
+  if (top && topSpecificTerms.length < 2) {
     blockers.push('low_signal_terms');
   }
 
-  if (top && !passesRetrievalConfidenceGate(top, input.question, topNonGenericTerms, input.route)) {
+  if (top && !passesRetrievalConfidenceGate(top, topSpecificTerms)) {
     blockers.push('low_retrieval_confidence');
-  }
-
-  if (missingAnswerRequirements.length > 0) {
-    blockers.push('question_not_answered');
-    ambiguity.push(`知识证据未覆盖原问题需要的答案：${missingAnswerRequirements.join('、')}`);
   }
 
   // Conflict
@@ -266,7 +236,7 @@ export function judgeKnowledgeEvidence(input: {
       ? '知识库命中 active FAQ/runbook/whitepaper 证据，内容可支撑直接回答。'
       : `知识库有命中但分数不足（score=${normalizedScore.toFixed(2)}, blockers=${blockers.length}），需要补充证据或升级查询。`,
     risks,
-    missing: answerable ? [] : missingAnswerRequirements.length > 0 ? missingAnswerRequirements : ['更高置信证据'],
+    missing: answerable ? [] : ['更高置信证据'],
     conflicts,
     blockers,
     ambiguity,
@@ -352,22 +322,19 @@ function computeBreakdown(
   }
   const top = results[0]!;
   const matchedTermCount = top.matched_terms.length;
-  const genericHits = top.matched_terms.filter((t) => GENERIC_KEYWORDS.includes(t)).length;
   const titleMatch = state.question && top.title && state.question.includes(top.title.slice(0, 4)) ? 1 : 0;
   const moduleMatch = state.route.moduleCandidates.length === 0 || state.route.moduleCandidates.includes(top.module) ? 1 : 0;
 
-  const relevance = Math.min(1, Math.max(0.1, (matchedTermCount * 0.18) + (titleMatch * 0.25) + (moduleMatch * 0.15)) - (genericHits >= matchedTermCount ? 0.3 : 0));
+  const relevance = Math.min(1, Math.max(0.1, (matchedTermCount * 0.18) + (titleMatch * 0.25) + (moduleMatch * 0.15)));
   const sourceCoverage = /faq|runbook|whitepaper|solved_case/.test(top.source_type) ? 0.85 : 0.45;
-  const answerCoverage = evaluateQuestionAnswerCoverage(state.question, results);
-  const coverage = answerCoverage.required.length > 0 ? Math.min(sourceCoverage, answerCoverage.score) : sourceCoverage;
+  const coverage = sourceCoverage;
   const source_authority = sourceAuthority[top.source_type] ?? 0.4;
   const freshness = isStale(top) ? 0.35 : 0.9;
   const version_match = top.status === 'active' ? 0.8 : 0.45;
   const agreement = state.conflicts.length > 0 ? 0.2 : results.length > 1 ? 0.9 : 0.75;
   const actionability = /faq|runbook|solved_case/.test(top.source_type) ? 0.9 : 0.65;
   const conflict_penalty = state.conflicts.length > 0 ? 0.25 : 0;
-  const nonGenericHits = matchedTermCount - genericHits;
-  const ambiguity_penalty = matchedTermCount < 2 || nonGenericHits <= 1 || genericHits >= nonGenericHits ? 0.15 : 0;
+  const ambiguity_penalty = matchedTermCount < 2 ? 0.15 : 0;
   const risk_penalty = state.risks.length > 0 ? 0.2 : 0;
   const quality_penalty = top.quality?.severity === 'error' ? 0.3 : top.quality?.severity === 'warn' ? 0.1 : 0;
 
@@ -465,105 +432,18 @@ function hasCompleteProvenance(result: KnowledgeEvidenceResult): boolean {
 
 function passesRetrievalConfidenceGate(
   result: KnowledgeEvidenceResult,
-  question: string,
   specificTerms: string[],
-  route: KnowledgeRoute,
 ): boolean {
   if (result.retrieval?.source === 'rerank') {
     return (result.retrieval.rerankScore ?? 0) >= 0.7;
   }
-  if (isFeatureOverviewEvidence(result, question, route, specificTerms)) {
-    return true;
-  }
-  const normalizedQuestion = normalizeForExactMatch(question);
-  const normalizedTitle = normalizeForExactMatch(result.title);
-  return normalizedTitle.length >= 4 && normalizedQuestion.includes(normalizedTitle) && specificTerms.length >= 2;
+  const lexicalScore = result.retrieval?.keywordScore ?? result.score;
+  return specificTerms.length >= 2 && Number.isFinite(lexicalScore) && lexicalScore > 0;
 }
 
-function isFeatureOverviewEvidence(
-  result: KnowledgeEvidenceResult,
-  question: string,
-  route: KnowledgeRoute,
-  specificTerms: string[],
-): boolean {
-  const asksFeatureOverview = route.intentCandidates.includes('feature_overview') ||
-    /有哪些功能|有什么功能|什么功能|功能有哪些|功能清单|功能列表|有哪些能力|有什么能力|支持哪些|能做什么|主要功能|能力/.test(question);
-  const routeModuleMatches = route.moduleCandidates.length > 0 && route.moduleCandidates.includes(result.module);
-  const sourceCanAnswer = /faq|whitepaper|module_doc/.test(result.source_type);
-  return asksFeatureOverview &&
-    routeModuleMatches &&
-    result.intent === 'feature_overview' &&
-    sourceCanAnswer &&
-    specificTerms.length >= 2;
+function hasBoundedAnswerSpan(text: string): boolean {
+  const length = Array.from(text.trim()).length;
+  return length > 0 && length <= 500 && !/[\u0000-\u001F\u007F]/.test(text);
 }
 
-function normalizeForExactMatch(value: string): string {
-  return value.toLowerCase().replace(/[\s，。！？、,.!?：:；;（）()\[\]【】《》<>"'“”‘’_-]+/g, '');
-}
-
-function isSpecificTerm(term: string): boolean {
-  const normalized = term.trim();
-  return normalized.length >= 2 && !GENERIC_KEYWORDS.includes(normalized);
-}
-
-function hasAnswerBearingSentence(text: string): boolean {
-  const sentences = text.split(/[\n。；;]/).map((s) => s.trim()).filter(Boolean);
-  return sentences.some((s) => ANSWER_BEARING_PATTERNS.some((p) => p.test(s)));
-}
-
-interface AnswerRequirement {
-  id: string;
-  label: string;
-  evidencePattern: RegExp;
-}
-
-function evaluateQuestionAnswerCoverage(
-  question: string,
-  results: KnowledgeEvidenceResult[],
-): { required: AnswerRequirement[]; missing: AnswerRequirement[]; score: number } {
-  const required = inferAnswerRequirements(question);
-  if (required.length === 0) {
-    return { required, missing: [], score: 1 };
-  }
-  const evidenceText = normalizeEvidenceText(results);
-  const missing = required.filter((requirement) => !requirement.evidencePattern.test(evidenceText));
-  return {
-    required,
-    missing,
-    score: Number(((required.length - missing.length) / required.length).toFixed(2)),
-  };
-}
-
-function inferAnswerRequirements(question: string): AnswerRequirement[] {
-  const requirements: AnswerRequirement[] = [];
-  const normalized = question.toLowerCase();
-
-  if (/(缺少|缺失|漏|没有).{0,20}(数据|统计)|补上.{0,20}(数据|统计)|(数据|统计).{0,20}补上|补(数据|统计)|补跑|重跑|回补/.test(normalized)) {
-    requirements.push({
-      id: 'statistics_backfill_procedure',
-      label: '补统计/回补数据的处理步骤',
-      evidencePattern: /(补跑|重跑|回补|补录|补数据|补统计|重新生成|刷新|修复|rebuild|regenerate).{0,40}(数据|统计)|(数据|统计).{0,40}(补跑|重跑|回补|补录|重新生成|刷新|修复|rebuild|regenerate)/i,
-    });
-  }
-
-  if (/有没有.{0,12}(现成)?(命令|命令行)|命令行|\bcli\b|\bcommand\b/i.test(question)) {
-    requirements.push({
-      id: 'command_line_operation',
-      label: '命令行或命令名称/参数',
-      evidencePattern: /命令行|命令|console|\bcli\b|\bcommand\b|app\/console|bin\/console|artisan|rake|npm run|pnpm|yarn|php\s+\S*console|--[A-Za-z0-9-]+/i,
-    });
-  }
-
-  return requirements;
-}
-
-function normalizeEvidenceText(results: KnowledgeEvidenceResult[]): string {
-  return results.map((result) => [
-    result.title,
-    result.summary,
-    result.answer_span,
-    result.excerpt,
-  ].filter(Boolean).join('\n')).join('\n').toLowerCase();
-}
-
-export const __testing = { hasAnswerBearingSentence, GENERIC_KEYWORDS, ANSWER_BEARING_PATTERNS };
+export const __testing = { hasBoundedAnswerSpan };

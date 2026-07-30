@@ -43,6 +43,14 @@ Preflight dispatch
 | Worker 失败 | 转成结构化 partial/need_input，再进入 Review |
 | 所有来源都不足 | Review 决定追问、partial 或人工升级 |
 
+## Experience 当前来源重验
+
+Experience 不复用历史 rendered reply 或 summary。只有规范化后的 `resolvedQuestion`、
+`answerObject`、must-answer item set 全部精确相等，且历史结构化 claims/evidence 能通过当前
+source resolver 重验时，才进入与其他来源相同的 Coverage Review。Knowledge 重新解析当前 active
+v4 generation；缺少结构化 selector 的历史 Workspace/MCP，以及历史 manual/log/history/unknown，
+只能作为调查线索。
+
 ## 代码入口
 
 - `src/runtime/experience-turn.ts`

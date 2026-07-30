@@ -11,6 +11,7 @@ import {
   createRunningDiagnosticRun,
   prepareDeepQueryRetry,
 } from './worker-turn.js';
+import type { CoverageEvidenceEnvelope } from './coverage-evidence-provenance.js';
 
 export class WorkerDiagnosisService {
   constructor(
@@ -34,7 +35,9 @@ export class WorkerDiagnosisService {
     this.store.saveCase(caseSession);
     this.events.workerTrace(caseSession, workerResponse.trace);
 
-    let review = await this.reviewer.reviewAndFormat(caseSession, result, run);
+    let review = await this.reviewer.reviewAndFormat(caseSession, result, run, {
+      coverageEvidenceEnvelopes: workerCoverageEnvelopes(workerResponse),
+    });
     if (!shouldRunFollowUp(review, result, workerResponse.trace)) {
       return review;
     }
@@ -98,7 +101,20 @@ export class WorkerDiagnosisService {
     caseSession.status = 'diagnosing';
     this.store.saveCase(caseSession);
     this.events.workerTrace(caseSession, followUpResponse.trace);
-    review = await this.reviewer.reviewAndFormat(caseSession, followUpResponse.result, followUpRun);
+    review = await this.reviewer.reviewAndFormat(caseSession, followUpResponse.result, followUpRun, {
+      coverageEvidenceEnvelopes: workerCoverageEnvelopes(followUpResponse),
+    });
     return review;
   }
+}
+
+function workerCoverageEnvelopes(
+  response: Awaited<ReturnType<DiagnosticWorker['diagnose']>>,
+): CoverageEvidenceEnvelope[] {
+  return (response.coverageEvidence ?? []).map((item) => ({
+    ...item,
+    freshness: item.kind === 'log'
+      ? 'current_log_excerpt' as const
+      : 'current_worker_run' as const,
+  }));
 }

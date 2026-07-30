@@ -4,10 +4,11 @@ import { chunksPath, dirtyFlagPath } from '../paths.js';
 import type { KnowledgeChunk, KnowledgeDocument } from '../types.js';
 import { extractKnowledgeTerms } from './terms.js';
 
-import { lastBoundedCompleteSentence, markLegacyChunk, normalizeChunkingOptions, overlapText, positiveInteger, slug, sourceBlocksForChild, splitIntoSentences, stripMarkdown, windowOverlap } from './chunk-utils.js';
+import { markLegacyChunk, normalizeChunkingOptions, overlapText, slug, sourceBlocksForChild, splitIntoSentences, stripMarkdown, windowOverlap } from './chunk-utils.js';
 export { markLegacyChunk } from './chunk-utils.js';
-import { CURRENT_ARTIFACT_VERSION, CURRENT_CHUNKING_STRATEGY, type KnowledgeChunkingOptions, type NormalizedChunkingOptions } from './chunk-contracts.js';
+import { CURRENT_ARTIFACT_VERSION, CURRENT_CHUNKING_STRATEGY, MAX_RETRIEVAL_SECTION_PREFIX_CODE_POINTS, type KnowledgeChunkingOptions, type NormalizedChunkingOptions } from './chunk-contracts.js';
 export type { KnowledgeChunkingOptions, NormalizedChunkingOptions } from './chunk-contracts.js';
+import { rebalanceUndersized, type ChildDraft } from './chunk-rebalance.js';
 
 export function loadKnowledgeChunksForSearch(
   workspaceRoot: string,
@@ -58,6 +59,11 @@ function chunkDocument(document: KnowledgeDocument, options: NormalizedChunkingO
       sourceBlockIds,
       childOrder,
     })).digest('hex');
+    const sectionPrefix = Array.from(draft.sectionPath.join(' / '))
+      .slice(0, MAX_RETRIEVAL_SECTION_PREFIX_CODE_POINTS)
+      .join('');
+    const retrievalText = [sectionPrefix, draft.text].filter(Boolean).join('\n');
+    const retrievalTextHash = createHash('sha256').update(retrievalText).digest('hex');
     return {
       chunk_id: `chk_${slug(frontmatter.id)}_${String(childOrder).padStart(3, '0')}`,
       parent_id: frontmatter.id,
@@ -80,10 +86,12 @@ function chunkDocument(document: KnowledgeDocument, options: NormalizedChunkingO
         ...draft.sectionPath,
       ].flatMap((item) => extractKnowledgeTerms(item)))),
       text: draft.text,
+      retrieval_text: retrievalText,
       child_order: childOrder,
       source_block_ids: sourceBlockIds,
       section_path: draft.sectionPath,
       text_hash: textHash,
+      retrieval_text_hash: retrievalTextHash,
       parent_title: frontmatter.title,
       parent_terms: [...frontmatter.related_terms],
       quality_status: frontmatter.quality_status,
@@ -92,6 +100,7 @@ function chunkDocument(document: KnowledgeDocument, options: NormalizedChunkingO
       legacy: false,
       manual_split_required: draft.manualSplitRequired || undefined,
       overlap_chars: draft.overlapChars || undefined,
+      undersized_unmergeable: draft.undersizedUnmergeable || undefined,
     } satisfies KnowledgeChunk;
   });
 }
@@ -100,14 +109,6 @@ interface SectionBlock {
   text: string;
   sectionPath: string[];
   blockIndex: number;
-}
-
-interface ChildDraft {
-  text: string;
-  sectionPath: string[];
-  blockIndexes: number[];
-  manualSplitRequired: boolean;
-  overlapChars: number;
 }
 
 function sectionBlocks(document: KnowledgeDocument): SectionBlock[] {
@@ -167,7 +168,7 @@ function packSection(blocks: SectionBlock[], options: NormalizedChunkingOptions)
   const flush = (manualSplitRequired = false): void => {
     const text = texts.join('\n\n').trim();
     if (!text) return;
-    children.push({ text, sectionPath, blockIndexes: [...indexes], manualSplitRequired, overlapChars });
+    children.push({ text, sectionPath, blockIndexes: [...indexes], manualSplitRequired, overlapChars, undersizedUnmergeable: false });
     texts = [];
     indexes = [];
     overlapChars = 0;
@@ -192,7 +193,7 @@ function packSection(blocks: SectionBlock[], options: NormalizedChunkingOptions)
     indexes.push(block.blockIndex);
   }
   flush();
-  return children;
+  return rebalanceUndersized(children, options);
 }
 
 function splitLongBlock(
@@ -208,6 +209,7 @@ function splitLongBlock(
       blockIndexes: [block.blockIndex],
       manualSplitRequired: true,
       overlapChars: 0,
+      undersizedUnmergeable: block.text.length < options.minChars,
     }];
   }
 
@@ -223,6 +225,7 @@ function splitLongBlock(
       blockIndexes: [block.blockIndex],
       manualSplitRequired: false,
       overlapChars: currentOverlapChars,
+      undersizedUnmergeable: false,
     });
   };
 

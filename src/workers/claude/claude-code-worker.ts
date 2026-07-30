@@ -5,6 +5,7 @@ import { runCommandWithSessionBusyRetry, shellCommand } from './claude-cli.js';
 import { failedExecutionDiagnosticResult, mockDiagnosticResponse, parseClaudeOutput } from './claude-output-parser.js';
 import { buildClaudeSystemPrompt, buildClaudeUserPrompt } from './claude-prompts.js';
 import { assertHostCommandAllowed, DEFAULT_DISALLOWED_CLAUDE_TOOLS, readOnlyTools } from './claude-policy.js';
+import { currentWorkerCoverageEvidence } from './coverage-evidence.js';
 
 export class ClaudeCodeWorker implements DiagnosticWorker {
   private static readonly sessionQueues = new Map<string, Promise<void>>();
@@ -87,9 +88,11 @@ export class ClaudeCodeWorker implements DiagnosticWorker {
       };
     }
 
+    const result = parseClaudeOutput(execution.stdout, request);
     return {
-      result: parseClaudeOutput(execution.stdout, request),
+      result,
       trace,
+      coverageEvidence: currentWorkerCoverageEvidence(request, result),
     };
   }
 

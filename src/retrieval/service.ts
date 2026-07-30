@@ -1,5 +1,6 @@
 import { retrievalCandidatesToEvidencePack } from './evidence-pack.js';
 import { redactProviderErrorMessage } from '../providers/redaction.js';
+import { readActiveKnowledgeGeneration } from '../knowledge/generation-store.js';
 import { fuseWithRrf } from './fusion/rrf.js';
 import { normalizeStrategyCandidates } from './fusion/normalize.js';
 import type { NormalizedQuery } from './query/normalize.js';
@@ -34,7 +35,9 @@ export function createRetrievalService(input: {
       const fusionLimit = input.fusionLimit ?? recallLimit;
       const trace = createEmptyRetrievalTrace();
       const normalizedQuery = request.normalizedQuery ?? input.queryNormalizer?.(request.query, request.workspaceRoot);
-      const recallRequest = { ...request, normalizedQuery };
+      const knowledgeGenerationId = readActiveKnowledgeGeneration(request.workspaceRoot)?.generation_id;
+      if (knowledgeGenerationId) trace.generationId = knowledgeGenerationId;
+      const recallRequest = { ...request, normalizedQuery, knowledgeGenerationId };
       const recalled: RetrievalCandidate[] = [];
       const filteredOut: Array<{ reason: string; count: number }> = [];
 

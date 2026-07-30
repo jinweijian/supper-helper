@@ -22,9 +22,10 @@ export function searchVectorArtifactsWithFilters(input: {
   intentCandidates?: RetrievalInput['intentCandidates'];
   sourceTypes?: RetrievalInput['sourceTypes'];
   visibility?: RetrievalInput['visibility'];
+  generationId?: string;
 }): { candidates: RetrievalCandidate[]; filteredOut: Array<{ reason: string; count: number }> } {
-  const loadedVectors = readKnowledgeVectorRecords(input.workspaceRoot);
-  const loadedChunks = readKnowledgeChunks(input.workspaceRoot);
+  const loadedVectors = readKnowledgeVectorRecords(input.workspaceRoot, input.generationId);
+  const loadedChunks = readKnowledgeChunks(input.workspaceRoot, input.generationId);
   const chunkById = new Map(loadedChunks.chunks.map((chunk) => [chunk.chunk_id, chunk]));
   const parents = loadKnowledgeParentGrounding(input.workspaceRoot);
   const filtered = new Map<string, number>();

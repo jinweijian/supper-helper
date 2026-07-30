@@ -22,8 +22,10 @@
 | `DiagnosticResult` | Experience、Knowledge、Worker | Result Validator、Review Gate |
 | `Evidence` | Knowledge、Worker、manual/history | claims、Review、Presentation |
 | `DiagnosticClaim` | Experience、Knowledge、Worker | Result Validator、Review Gate |
-| `ValidatedDiagnosticResult` | Result Validator | Review Gate、Presentation |
-| Presentation output | Presentation model 或 fallback | helper message |
+| `AnswerGoalCompletenessReview` | 独立 completeness reviewer | Preflight reconcile |
+| `AnswerCoverageReview` | 独立 coverage reviewer | Result Validator、Review Gate |
+| `SafeFrozenAnswerProjection` | Runtime materializer | Presentation model 与 fallback renderer |
+| Presentation plan | Presentation model | safe renderer |
 | `DiagnosticLogEvent` | EventRecorder | `/api/logs`、UI log drawer |
 
 ## 正常流程
@@ -34,8 +36,10 @@ CaseMessage(user)
   -> AnswerGoal
   -> DiagnosticRequest
   -> DiagnosticResult
-  -> ValidatedDiagnosticResult
-  -> Presentation output
+  -> independent coverage review
+  -> reviewed ID selection
+  -> SafeFrozenAnswerProjection
+  -> Presentation plan / deterministic fallback
   -> CaseMessage(helper)
 ```
 
@@ -51,7 +55,9 @@ CaseMessage(user)
 ### AnswerGoal
 
 - 用户可见回答目标的唯一权威。
-- `mustAnswerItems` 表示最终回答必须覆盖的项目。
+- `mustAnswerItems` 由 Preflight proposer 提出，再由独立
+  `answer-goal-completeness` reviewer 审核；不使用“哪里/多久/怎么”等关键词配对。
+- 形状、范围或完整性失败时整组回退不可见 sentinel `direct_answer`。
 - `diagnosticObjective` 只服务内部排查，不进入用户主答或 `directAnswer`。
 
 ### DiagnosticRequest
@@ -66,28 +72,36 @@ CaseMessage(user)
 - `DiagnosticClaim` 必须有 `type`、`role`、`answers` 和 evidence 引用边界。
 - fact claim 必须有证据；无 evidence 的 fact 必须拒绝或降级。
 
-### ValidatedDiagnosticResult
+### ValidatedDiagnosticResult 与 AnswerCoverageReview
 
-- Result Validator 的冻结输出。
-- 包含 accepted/rejected claim IDs、accepted primary answer claim IDs 和 validation issues。
+- producer 的 `claim.answers` 只是候选声明，不能自证覆盖。
+- reviewer 只接收 source-neutral、有界、已清洗的 claim/evidence segments，不接收 raw
+  `Evidence.summary/source`、trace、provider payload 或完整 retrieval text。
+- 多个 accepted primary claims 可联合覆盖 items；`fullQuestionClaimIds` 指定完整回答中不可省略的条件、限制或时效 claim。
 - Review Gate 基于它决定 case status 和用户可见 decision。
 
-### Presentation Output Contract
+### SafeFrozenAnswerProjection
 
-Presentation model 只能返回：
+- Runtime 在 Presentation 前完成 selection、freshness、脱敏、bounds 和 prompt-safety review。
+- Knowledge 只接受当前 active v4 generation；Workspace/Log 要求 same-run；MCP 要求当前
+  allowlisted read-only call；不可重验的 history 不生成 coverage segment。
+- Renderer 的函数签名只接受安全投影、persona 与可选 plan，不能回查 raw result。
+
+### Presentation Output Contract（安全 ID Plan）
+
+Presentation model 只能排序已冻结 ID：
 
 ```json
 {
-  "answerTarget": "...",
-  "directAnswer": "...",
-  "reply": "...",
   "claimIds": ["claim_1"],
   "evidenceIds": ["ev_1"],
-  "directAnswerClaimIds": ["claim_1"]
+  "directAnswerClaimIds": ["claim_1"],
+  "actionClaimIds": ["action_1"]
 }
 ```
 
-其中 `directAnswerClaimIds` 必须等于冻结的 accepted primary answer claim IDs。`reply` 只能表达 accepted claims/evidence/missingInfo。
+模型不能返回自由回复、`answerTarget`、outcome 或新事实。`directAnswerClaimIds` 与
+`actionClaimIds` 必须等于安全投影的 required 集合；不合法时 deterministic renderer 使用同一投影。
 
 ## 失败/降级
 
@@ -97,7 +111,10 @@ Presentation model 只能返回：
 | fact 证据强度不足 | 降级或拒绝 |
 | final_answer 缺 primary answer | 不能 final |
 | Presentation 输出不合法 | 使用 fallback presenter |
-| helper reply 包含未审核事实 | 校验失败，不能使用模型输出 |
+| completeness reviewer 不可用 | 整组 items 回退 sentinel |
+| coverage reviewer 不可用/缺 binding | 不能 final |
+| opaque prompt reviewer 不可用 | 未明确接受的追问不可见 |
+| helper reply 包含 secret/path/trace | whole-reply scan 阻断或脱敏 |
 
 ## 代码入口
 
@@ -106,9 +123,12 @@ Presentation model 只能返回：
 - `src/runtime/answer-goal.ts`
 - `src/runtime/request-builder.ts`
 - `src/runtime/result-validator.ts`
+- `src/runtime/answer-goal-completeness-review-service.ts`
+- `src/runtime/answer-coverage-service.ts`
+- `src/runtime/safe-answer-projection.ts`
+- `src/runtime/safe-answer-renderer.ts`
 - `src/runtime/review-gate.ts`
 - `src/runtime/review-presentation.ts`
-- `src/runtime/presenter.ts`
 
 ## 不负责什么
 

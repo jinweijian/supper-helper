@@ -463,4 +463,65 @@ test('extractor refuses schema-invalid envelopes instead of promoting assumption
   const result = await service.run(request);
   assert.equal(result, undefined);
   assert.equal(request.context.mcp.evidence.length, 1);
+  assert.deepEqual(service.currentCoverageEvidence(request), []);
+});
+
+test('MCP adapter exposes coverage only for a validated current read-only allowlisted envelope', async () => {
+  const config = defaultConfig();
+  config.claude.commandWhitelist = ['node'];
+  config.workspaces[0].mcpToolIds = ['local-docs'];
+  config.mcpTools = [stdioServer({ allowedToolNames: ['lookup'] })];
+  const service = new McpEvidenceService(config, {
+    createClient: async () => ({
+      async listTools() { return [{ name: 'lookup' }]; },
+      async callTool() {
+        return {
+          content: [{ type: 'text', text: '适配器规范化后的当前证据' }],
+          structuredContent: {
+            superHelperEvidence: {
+              confidence: 'high',
+              claims: [{
+                text: '当前配置已经开启',
+                type: 'fact',
+                role: 'primary_answer',
+                answers: ['状态'],
+              }],
+            },
+          },
+        };
+      },
+      async close() {},
+    }),
+  });
+  const request = {
+    caseId: 'case_safe',
+    runId: 'run_01',
+    workspaceId: 'current',
+    claudeSessionId: 'claude',
+    answerGoal: {
+      rawUserQuestion: 'q',
+      resolvedQuestion: 'q',
+      answerObject: 'x',
+      mustAnswerItems: ['状态'],
+      diagnosticObjective: 'd',
+      sourceMessageIds: ['msg'],
+    },
+    userGoal: 'q',
+    knownFacts: [],
+    unknowns: [],
+    constraints: [],
+    allowedMcpToolIds: ['local-docs'],
+  };
+
+  const result = await service.run(request);
+  assert.equal(result?.status, 'concluded');
+  assert.deepEqual(service.currentCoverageEvidence(request), [{
+    evidenceId: 'mcp_ev_01',
+    safeText: '适配器规范化后的当前证据',
+    runId: 'run_01',
+    validated: true,
+    readOnly: true,
+    allowlisted: true,
+    completed: true,
+  }]);
 });

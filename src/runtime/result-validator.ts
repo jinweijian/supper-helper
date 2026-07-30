@@ -36,16 +36,12 @@ export interface ValidatedDiagnosticResult {
   outcomeReasonCode: string;
 }
 
-export function validateDiagnosticResult(
+export function validateDiagnosticStructure(
   result: DiagnosticResult,
   answerGoal?: AnswerGoal,
-  coverageReview?: AnswerCoverageReview,
-  upstreamReview?: { blockers?: ReviewGlobalBlocker[] },
 ): ValidatedDiagnosticResult {
-  const coverageReviewRequired = arguments.length >= 3;
-  const goal = answerGoal ?? fallbackAnswerGoal();
   const issues: DiagnosticValidationIssue[] = [];
-  const globalBlockers: ReviewGlobalBlocker[] = [...(upstreamReview?.blockers ?? [])];
+  const globalBlockers: ReviewGlobalBlocker[] = [];
   const evidence = uniqueEvidence(result.evidence, issues);
   if (evidence.length !== result.evidence.length) {
     globalBlockers.push({ code: 'duplicate_evidence_id' });
@@ -116,13 +112,47 @@ export function validateDiagnosticResult(
     claims.push({ ...claim, id, evidenceIds: validEvidenceIds });
   });
 
-  const acceptedPrimaryAnswerClaimIds = coverageReviewRequired
-    ? coverageReview
-      ? selectFrozenPrimaryClaimIds({ claims, answerGoal: goal, review: coverageReview })
-      : []
-    : claims.filter((claim) => claimCoversAnswerGoal(claim, goal)).map((claim) => claim.id!);
+  const validated: DiagnosticResult = {
+    ...result,
+    evidence,
+    claims,
+    missingInfo: result.missingInfo,
+  };
+  return {
+    result: validated,
+    issues,
+    acceptedClaimIds: claims.map((claim) => claim.id!),
+    rejectedClaimIds,
+    acceptedPrimaryAnswerClaimIds: [],
+    globalBlockers,
+    outcomeReasonCode: 'structural_validation_complete',
+  };
+}
+
+export function freezeReviewedDiagnosticResult(input: {
+  structural: ValidatedDiagnosticResult;
+  answerGoal: AnswerGoal;
+  coverageReview?: AnswerCoverageReview;
+  upstreamBlockers?: ReviewGlobalBlocker[];
+}): ValidatedDiagnosticResult {
+  const issues = [...input.structural.issues];
+  const globalBlockers = [
+    ...input.structural.globalBlockers,
+    ...(input.upstreamBlockers ?? []),
+  ];
+  const acceptedPrimaryAnswerClaimIds = input.coverageReview
+    ? selectFrozenPrimaryClaimIds({
+        claims: input.structural.result.claims,
+        answerGoal: input.answerGoal,
+        review: input.coverageReview,
+      })
+    : [];
   const coverageComplete = acceptedPrimaryAnswerClaimIds.length > 0;
-  if ((result.status === 'concluded' || result.recommendedNextAction === 'final_answer') && acceptedPrimaryAnswerClaimIds.length === 0) {
+  const result = input.structural.result;
+  if (
+    (result.status === 'concluded' || result.recommendedNextAction === 'final_answer') &&
+    !coverageComplete
+  ) {
     issues.push({
       code: 'missing_primary_answer',
       message: 'Final answer requires an accepted primary_answer claim that covers answerGoal.mustAnswerItems.',
@@ -136,25 +166,42 @@ export function validateDiagnosticResult(
     missingInfo: result.missingInfo,
     globalBlockers,
   });
-  const downgrade = outcome.status !== result.status || outcome.action !== result.recommendedNextAction;
-  const validated: DiagnosticResult = {
-    ...result,
-    status: outcome.status,
-    summary: downgrade ? '诊断结果包含未通过证据校验的内容，暂不能形成最终结论。' : result.summary,
-    evidence,
-    claims,
-    missingInfo: result.missingInfo,
-    recommendedNextAction: outcome.action,
-  };
+  const downgrade = outcome.status !== result.status ||
+    outcome.action !== result.recommendedNextAction;
   return {
-    result: validated,
+    ...input.structural,
+    result: {
+      ...result,
+      status: outcome.status,
+      summary: downgrade
+        ? '诊断结果包含未通过证据校验的内容，暂不能形成最终结论。'
+        : result.summary,
+      recommendedNextAction: outcome.action,
+    },
     issues,
-    acceptedClaimIds: claims.map((claim) => claim.id!),
-    rejectedClaimIds,
     acceptedPrimaryAnswerClaimIds,
     globalBlockers,
     outcomeReasonCode: outcome.reasonCode,
   };
+}
+
+/**
+ * Conservative convenience API for non-presentation callers.
+ * Production presentation uses the two explicit phases above.
+ */
+export function validateDiagnosticResult(
+  result: DiagnosticResult,
+  answerGoal?: AnswerGoal,
+  coverageReview?: AnswerCoverageReview,
+  upstreamReview?: { blockers?: ReviewGlobalBlocker[] },
+): ValidatedDiagnosticResult {
+  const goal = answerGoal ?? fallbackAnswerGoal();
+  return freezeReviewedDiagnosticResult({
+    structural: validateDiagnosticStructure(result, goal),
+    answerGoal: goal,
+    coverageReview,
+    upstreamBlockers: upstreamReview?.blockers,
+  });
 }
 
 function validClaimRole(role: unknown): role is DiagnosticClaimRole {
@@ -164,12 +211,6 @@ function validClaimRole(role: unknown): role is DiagnosticClaimRole {
     role === 'process_note' ||
     role === 'next_action' ||
     role === 'unknown';
-}
-
-function claimCoversAnswerGoal(claim: DiagnosticClaim, answerGoal: AnswerGoal): boolean {
-  return claim.role === 'primary_answer' &&
-    (claim.type === 'fact' || claim.type === 'inference') &&
-    answerGoal.mustAnswerItems.every((item) => claim.answers.includes(item));
 }
 
 function fallbackAnswerGoal(): AnswerGoal {

@@ -37,6 +37,7 @@ export function createEmbeddingRecallStrategy(input: EmbeddingRecallStrategyOpti
         const compatibility = checkKnowledgeVectorCompatibility({
           workspaceRoot: recallInput.workspaceRoot,
           embeddingConfig: input.embeddingConfig,
+          generationId: recallInput.knowledgeGenerationId,
         });
         if (compatibility.status !== 'compatible') {
           throw new Error(compatibility.reason ?? compatibility.status);
@@ -52,6 +53,7 @@ export function createEmbeddingRecallStrategy(input: EmbeddingRecallStrategyOpti
         intentCandidates: recallInput.intentCandidates,
         sourceTypes: recallInput.sourceTypes,
         visibility: recallInput.visibility,
+        generationId: recallInput.knowledgeGenerationId,
       });
       const candidates = searched.candidates;
       const missingParentCount = candidates.filter((candidate) => candidate.groundingIssues?.includes('missing_parent')).length;

@@ -24,13 +24,18 @@ If the userGoal names a file path such as package.json, read that file first and
 Workspace inspection requirements:
 - Before returning need_input for a selected workspace, first perform read-only inspection with the available tools unless the userGoal contains no searchable project signal.
 - Use Glob or Grep to inspect the current workspace for relevant README, CLAUDE.md, AGENTS.md, docs, specs, routes, services, jobs, event subscribers, configuration, and source files.
-- For broad business questions, search likely business terms from userGoal plus reasonable code synonyms. For Chinese product terms, also search obvious English or code-style translations.
-- If no relevant files are found, cite the exact Glob/Grep patterns or keywords you tried as low-confidence workspace evidence.
+- For broad product questions, derive bounded search queries from the current question's entities and concepts; do not classify or route the request with a fixed keyword list.
+- If no relevant files are found, cite the exact Glob/Grep queries you tried as low-confidence workspace evidence.
 - Do not cite paths outside the active workspace root as workspace evidence.
 - Do not use a missing top-level CLAUDE.md as the only workspace evidence when subdirectories may contain README.md, CLAUDE.md, AGENTS.md, docs, or source files.
 - Return need_input only after this minimum inspection cannot identify enough evidence or when a runtime/customer selector is truly required.
 If inspection finds partial evidence but not enough for a conclusion, return status "partial" with missingInfo.
 Return "final_answer" only when at least one fact/inference claim has role "primary_answer" and its answers cover every DiagnosticRequest.answerGoal.mustAnswerItems item.
+Put every evidence-supported configuration or remediation step in a claim with role "next_action"; do not leave an actionable step only in summary or process_note.
+Every next_action must bind relevant evidence IDs and exact current answerGoal.mustAnswerItems strings.
+Every next_action must additionally declare actionSafety as "read_only" or "requires_authorization" and executionStatus as "proposed".
+Use "requires_authorization" for deletion, overwrite, deployment, configuration writes, or any other mutation. You must not claim a proposed action was executed.
+If no safe evidence-supported action exists, omit next_action instead of inventing one.
 Return JSON only.
 
 Return this JSON shape:
@@ -53,7 +58,9 @@ Return this JSON shape:
       "role": "primary_answer | supporting_context | evidence_locator | process_note | next_action | unknown",
       "text": "claim text",
       "evidenceIds": ["ev_01"],
-      "answers": ["direct_answer"]
+      "answers": ["direct_answer"],
+      "actionSafety": "read_only | requires_authorization (required only for next_action)",
+      "executionStatus": "proposed (required only for next_action)"
     }
   ],
   "recommendedNextAction": "ask_user | continue_diagnosis | final_answer | escalate_to_human"

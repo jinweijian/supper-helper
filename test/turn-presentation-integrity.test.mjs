@@ -183,9 +183,135 @@ test('review freezes case status without publishing it before presentation', asy
     const review = await reviewer.reviewAndFormat(caseSession, concludedWorkerResult().result, run);
 
     assert.equal(caseSession.status, 'diagnosing');
-    assert.equal(review.caseStatus, 'concluded');
-    assert.equal(run.status, 'concluded');
+    assert.equal(review.caseStatus, 'partial');
+    assert.equal(run.status, 'partial');
+    assert.equal(run.result.status, 'partial');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('review hides opaque prompts when the independent prompt-safety seam is unavailable', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turn-integrity-prompt-safety-'));
+  try {
+    const { config, store } = createAgent(dir, { async diagnose() { return concludedWorkerResult(); } });
+    const caseSession = store.createCase({
+      tenantId: 'local',
+      userId: 'local-user',
+      workspaceId: 'current',
+      title: 'Prompt safety unavailable',
+    });
+    caseSession.status = 'diagnosing';
+    const run = { id: 'run_prompt_safety', caseId: caseSession.id, status: 'running' };
+    const result = concludedWorkerResult().result;
+    result.status = 'partial';
+    result.recommendedNextAction = 'ask_user';
+    result.missingInfo = ['必须先确认内部部署拓扑为双活'];
+    const reviewer = new ReviewPresentationService(
+      config,
+      new NoopModelClient(),
+      new CaseRuntimeEventRecorder(store),
+      '',
+      '',
+      '',
+    );
+
+    const review = await reviewer.reviewAndFormat(caseSession, result, run);
+
+    assert.equal(review.decision, 'partial');
+    assert.doesNotMatch(review.reply, /内部部署拓扑为双活/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('review production seam permits final only with current adapter provenance and never sends raw evidence fields', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turn-integrity-coverage-'));
+  try {
+    const { config, store } = createAgent(dir, { async diagnose() { return concludedWorkerResult(); } });
+    config.agent.modelProvider = 'test';
+    const modelCalls = [];
+    const model = {
+      async complete(messages) {
+        modelCalls.push(messages);
+        const system = messages[0].content;
+        if (system.includes('COVERAGE_SPEC')) {
+          return JSON.stringify({
+            status: 'accepted',
+            bindings: [{
+              claimId: 'claim_1',
+              answerItemIds: ['direct_answer'],
+              evidenceIds: ['ev_1'],
+            }],
+            fullQuestion: 'full',
+            fullQuestionClaimIds: ['claim_1'],
+            missingElements: [],
+          });
+        }
+        if (system.includes('PROMPT_SPEC')) {
+          return JSON.stringify({ status: 'accepted', acceptedIds: [] });
+        }
+        return JSON.stringify({
+          claimIds: ['claim_1'],
+          directAnswerClaimIds: ['claim_1'],
+          actionClaimIds: [],
+          evidenceIds: ['ev_1'],
+        });
+      },
+    };
+    const caseSession = store.createCase({
+      tenantId: 'local',
+      userId: 'local-user',
+      workspaceId: 'current',
+      title: 'Coverage production seam',
+    });
+    caseSession.status = 'diagnosing';
+    const result = concludedWorkerResult().result;
+    result.evidence[0].source = '/Users/private/RAW_SOURCE_MARKER';
+    result.evidence[0].summary = 'RAW_SUMMARY_MARKER token=sk-secret-value';
+    const run = {
+      id: 'run_current',
+      caseId: caseSession.id,
+      status: 'running',
+      request: {
+        answerGoal: {
+          rawUserQuestion: '问题',
+          resolvedQuestion: '问题',
+          answerObject: '问题',
+          mustAnswerItems: ['direct_answer'],
+          diagnosticObjective: '内部排查',
+          sourceMessageIds: ['msg_current'],
+        },
+      },
+    };
+    const reviewer = new ReviewPresentationService(
+      config,
+      model,
+      new CaseRuntimeEventRecorder(store),
+      'MAIN_SPEC',
+      'OUTPUT_SPEC',
+      'PRESENTATION_SPEC',
+      'COVERAGE_SPEC',
+      'PROMPT_SPEC',
+    );
+
+    const review = await reviewer.reviewAndFormat(caseSession, result, run, {
+      coverageEvidenceEnvelopes: [{
+        evidenceId: 'ev_1',
+        kind: 'workspace',
+        safeText: '当前运行适配器校验的安全证据',
+        freshness: 'current_worker_run',
+        runId: 'run_current',
+        validated: true,
+      }],
+    });
+
+    assert.equal(review.decision, 'final');
     assert.equal(run.result.status, 'concluded');
+    assert.match(review.reply, /已确认问题原因/);
+    const modelPayload = JSON.stringify(modelCalls);
+    assert.doesNotMatch(modelPayload, /RAW_SOURCE_MARKER|RAW_SUMMARY_MARKER|sk-secret-value/);
+    assert.match(modelPayload, /当前运行适配器校验的安全证据/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -378,8 +504,8 @@ const activeUntilFormalReplyScenarios = [
       return {};
     },
     verify({ settled, workerCalls }) {
-      assert.equal(workerCalls.count, 0);
-      assert.equal(settled.caseSession.logs.some((event) => event.phase === 'experience_hit'), true);
+      assert.equal(workerCalls.count, 1);
+      assert.equal(settled.caseSession.logs.some((event) => event.phase === 'experience_hit'), false);
     },
   },
   {

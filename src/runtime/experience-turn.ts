@@ -3,7 +3,11 @@ import type { DiagnosticRequest, DiagnosticRun } from '../domain.js';
 import type { CaseRepository, StoredCase } from '../sessions/case-repository.js';
 import type { RuntimeTurnResponse } from './contracts.js';
 import { CaseRuntimeEventRecorder } from './event-recorder.js';
-import { findExperienceMatch, findRejectedExperienceCandidates } from './experience-agent.js';
+import {
+  findExperienceMatch,
+  findRejectedExperienceCandidates,
+  type ExperienceCurrentEvidenceResolver,
+} from './experience-agent.js';
 import { ReviewPresentationService } from './review-presentation.js';
 import { completePresentedTurn } from './turn-completion.js';
 
@@ -12,6 +16,7 @@ export class ExperienceTurnService {
     private readonly store: CaseRepository,
     private readonly events: CaseRuntimeEventRecorder,
     private readonly reviewer: ReviewPresentationService,
+    private readonly currentEvidenceResolver?: ExperienceCurrentEvidenceResolver,
   ) {}
 
   async answer(
@@ -25,6 +30,7 @@ export class ExperienceTurnService {
       currentCase: caseSession,
       userMessage: request.userGoal,
       answerGoal: request.answerGoal,
+      currentEvidenceResolver: this.currentEvidenceResolver,
     });
 
     if (!match) {
@@ -33,6 +39,7 @@ export class ExperienceTurnService {
         currentCase: caseSession,
         userMessage: request.userGoal,
         answerGoal: request.answerGoal,
+        currentEvidenceResolver: this.currentEvidenceResolver,
       });
       if (rejectedCandidates.length > 0) {
         request.context ??= {
@@ -64,7 +71,9 @@ export class ExperienceTurnService {
     };
     caseSession.status = 'diagnosing';
     this.store.addRun(caseSession, run);
-    const review = await this.reviewer.reviewAndFormat(caseSession, match.result, run);
+    const review = await this.reviewer.reviewAndFormat(caseSession, match.result, run, {
+      coverageEvidenceEnvelopes: match.coverageEvidenceEnvelopes,
+    });
     return completePresentedTurn({
       store: this.store,
       events: this.events,

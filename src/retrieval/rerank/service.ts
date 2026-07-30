@@ -29,7 +29,7 @@ export function createProviderReranker(input: {
     async rerank(request) {
       const documents = request.candidates.map((candidate) => ({
         id: candidate.chunkId ?? candidate.id,
-        text: candidate.text,
+        text: candidate.retrievalText ?? candidate.text,
         metadata: candidate.metadata,
       }));
       const result = await input.provider!.rerank({

@@ -1,6 +1,10 @@
 import type { SuperHelperConfig } from '../config.js';
 import type { DiagnosticRequest, DiagnosticRun } from '../domain.js';
-import { resolveKnowledgeWorkspaceRoot } from '../knowledge/index.js';
+import {
+  readActiveKnowledgeGeneration,
+  readKnowledgeChunks,
+  resolveKnowledgeWorkspaceRoot,
+} from '../knowledge/index.js';
 import type { CaseRepository, StoredCase } from '../sessions/case-repository.js';
 import type { RuntimeTurnResponse } from './contracts.js';
 import { CaseRuntimeEventRecorder } from './event-recorder.js';
@@ -76,10 +80,7 @@ export class KnowledgeTurnService {
     }
 
     const ragBlocksDirectAnswer = Boolean(
-      answerability &&
-        (answerability.answerability === 'partial' ||
-          answerability.answerability === 'none' ||
-          (answerability.answerability === 'unknown' && answerability.shouldEscalate)),
+      answerability && answerability.answerability !== 'full'
     );
     const questionNotAnsweredBlocker: EvidenceJudgeBlocker = 'question_not_answered';
     const finalJudge = {
@@ -115,7 +116,13 @@ export class KnowledgeTurnService {
       return undefined;
     }
 
-    const result = diagnosticResultFromKnowledge({ evidencePack, judge: finalJudge, route, answerability });
+    const result = diagnosticResultFromKnowledge({
+      evidencePack,
+      judge: finalJudge,
+      route,
+      answerability,
+      answerGoal,
+    });
     const run: DiagnosticRun = {
       id: request.runId,
       caseId: caseSession.id,
@@ -127,7 +134,41 @@ export class KnowledgeTurnService {
     this.store.addRun(caseSession, run);
     this.events.preflightKnowledgeAnswer(caseSession, result);
     this.events.knowledgeAnswerSelected(caseSession, result);
-    const review = await this.reviewer.reviewAndFormat(caseSession, result, run);
+    const activeGeneration = readActiveKnowledgeGeneration(workspaceRoot);
+    const requestGenerationId = diagnosis.retrievalTrace.generationId;
+    const chunksById = new Map(readKnowledgeChunks(workspaceRoot, requestGenerationId).chunks
+      .map((chunk) => [chunk.chunk_id, chunk]));
+    const coverageEvidenceEnvelopes = evidencePack.results.flatMap((item) => {
+      const chunk = item.chunk_id ? chunksById.get(item.chunk_id) : undefined;
+      const safeText = item.answer_span ?? item.excerpt;
+      if (
+        !chunk ||
+        chunk.legacy ||
+        chunk.artifact_version !== 4 ||
+        chunk.chunking_strategy !== 'parent-child-v4' ||
+        chunk.undersized_unmergeable ||
+        chunk.manual_split_required ||
+        !activeGeneration ||
+        !requestGenerationId ||
+        activeGeneration.generation_id !== requestGenerationId ||
+        !safeText
+      ) {
+        return [];
+      }
+      return [{
+        evidenceId: item.evidence_id,
+        kind: 'knowledge' as const,
+        safeText,
+        freshness: 'current_knowledge_v4' as const,
+        validated: true,
+        generationId: requestGenerationId,
+        currentGenerationId: activeGeneration.generation_id,
+        strictEligible: item.status === 'active' && item.quality?.severity === 'ok' && !(item.grounding_issues?.length),
+      }];
+    });
+    const review = await this.reviewer.reviewAndFormat(caseSession, result, run, {
+      coverageEvidenceEnvelopes,
+    });
     return completePresentedTurn({
       store: this.store,
       events: this.events,

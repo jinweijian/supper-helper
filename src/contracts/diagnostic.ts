@@ -200,6 +200,13 @@ export interface WorkerTrace {
 export interface ClaudeWorkerResponse {
   result: DiagnosticResult;
   trace: WorkerTrace;
+  coverageEvidence?: Array<{
+    evidenceId: string;
+    kind: 'workspace' | 'log';
+    safeText: string;
+    runId: string;
+    validated: boolean;
+  }>;
 }
 
 export interface Evidence {

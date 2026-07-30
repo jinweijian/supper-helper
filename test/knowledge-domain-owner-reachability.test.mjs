@@ -56,7 +56,6 @@ test('local knowledge acceptance command is registered', () => {
 test('all oversized production implementations are explicitly reviewed and no Knowledge owner crosses layers', () => {
   const approved = new Set([
     'src/runtime/evidence-judge.ts',
-    'src/runtime/presenter.ts',
     'src/runtime/case-curator.ts',
     'src/onboarding/runner.ts',
     'src/runtime/knowledge-diagnosis.ts',

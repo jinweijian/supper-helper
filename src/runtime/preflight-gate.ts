@@ -61,16 +61,6 @@ export function summarizePreflightDecision(decision: PreflightDecision): Record<
     knownFacts: decision.request.knownFacts,
     unknowns: decision.request.unknowns,
     allowedMcpToolIds: decision.request.allowedMcpToolIds,
-    reason: '当前 workspace 已选中，且用户输入包含可只读检索的业务或技术信号。',
+    reason: '当前 workspace 已选中，且用户提供了非空问题，可开始有界只读检索。',
   };
-}
-
-export function isGenericWorkspaceFollowUp(question: string, missingInfo: string[]): boolean {
-  const text = `${question}\n${missingInfo.join('\n')}`.toLowerCase();
-  const asksGenericWorkspaceContext =
-    /产品|系统|项目|工作区|当前工作区|代码库|文档|wiki|目录|功能归属|后台|workspace|codebase|repository|repo/.test(text);
-  const asksBlockingRuntimeSelector =
-    /客户\s*id|客户编号|租户|tenant|trace\s*id|traceid|request\s*id|请求\s*id|订单|账号|用户\s*id|时间范围|具体时间|日志|服务器|环境|报错|错误信息|截图/.test(text);
-
-  return asksGenericWorkspaceContext && !asksBlockingRuntimeSelector;
 }

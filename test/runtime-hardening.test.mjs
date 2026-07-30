@@ -5,7 +5,7 @@ import { defaultConfig } from '../dist/config.js';
 import { CaseRuntimeEventRecorder } from '../dist/runtime/event-recorder.js';
 import { attachKnowledgeCodeEscalationContext, glossaryTermsFromDocuments } from '../dist/runtime/knowledge-diagnosis.js';
 import { planDeepQuery } from '../dist/runtime/deep-query-planner.js';
-import { ruleBasedReviewAndFormat } from '../dist/runtime/presenter.js';
+import { renderReviewedResultForTest as ruleBasedReviewAndFormat } from './helpers/render-reviewed-result.mjs';
 import { buildLogBlocks } from '../dist/observability/log-blocks.js';
 
 function recorderFixture() {
@@ -28,7 +28,7 @@ function recorderFixture() {
   return { recorder: new CaseRuntimeEventRecorder(repository), caseSession };
 }
 
-test('model preflight raw output is redacted and bounded before persistence', () => {
+test('model preflight raw output and candidate text are not persisted', () => {
   const { recorder, caseSession } = recorderFixture();
   const raw = `Let me analyze the situation carefully. apiKey: sk-secret-123 ${'chain-of-thought '.repeat(240)}`;
 
@@ -38,9 +38,9 @@ test('model preflight raw output is redacted and bounded before persistence', ()
     missingInfo: [],
   });
 
-  assert.equal(event.detail.raw.length <= 2000, true);
-  assert.doesNotMatch(event.detail.raw, /sk-secret-123/);
-  assert.equal(event.detail.parsed.action, 'dispatch');
+  assert.equal('raw' in event.detail, false);
+  assert.equal('parsed' in event.detail, false);
+  assert.deepEqual(event.detail, { action: 'dispatch', missingInfoCount: 0 });
 });
 
 test('worker raw output stdout is redacted before persistence', () => {
@@ -592,7 +592,7 @@ test('knowledge code escalation context preserves partial rag answerability', ()
   assert.match(request.constraints.join('\n'), /查找学员数据统计回补命令和月份参数/);
 });
 
-test('operations persona final reply hides internal whitepaper source paths while developer keeps them', () => {
+test('every persona hides internal whitepaper source paths', () => {
   const result = {
     status: 'concluded',
     summary: '证据来自 knowledge/_sources/whitepapers/ai-companion.docx',
@@ -623,6 +623,7 @@ test('operations persona final reply hides internal whitepaper source paths whil
   const developerReply = ruleBasedReviewAndFormat(result, 'developer');
 
   assert.doesNotMatch(operationsReply, /knowledge\/_sources\/whitepapers\//);
-  assert.match(operationsReply, /原始白皮书资料|业务资料/);
-  assert.match(developerReply, /knowledge\/_sources\/whitepapers\/ai-companion\.docx/);
+  assert.match(operationsReply, /内部资料/);
+  assert.doesNotMatch(developerReply, /knowledge\/_sources\/whitepapers\//);
+  assert.match(developerReply, /内部资料/);
 });

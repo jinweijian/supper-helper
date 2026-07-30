@@ -6,7 +6,6 @@ import type { EvidenceJudgeResult } from "../evidence-judge.js";
 import type { RetrievalTrace } from "../../retrieval/types.js";
 import type { ValidatedDiagnosticResult } from "../result-validator.js";
 import type { RagAnswerabilityResult } from "../rag-answerability-service.js";
-import { redactSecretText } from "../../redaction.js";
 import { decisionFromDiagnosticResult } from "../review-gate.js";
 import { agentIdentities, diagnosticRequestLogDetail, evidenceIdsFromResult, rawOutputSeverity, safeWorkerTrace, type EventRecorderSink } from "./base.js";
 
@@ -63,7 +62,7 @@ export function createPreflightEvents(sink: EventRecorderSink) {
     });
   },
 
-  modelPreflightResult(caseSession: StoredCase, raw: string, parsed: ModelPreflightParsed): DiagnosticLogEvent {
+  modelPreflightResult(caseSession: StoredCase, _raw: string, parsed: ModelPreflightParsed): DiagnosticLogEvent {
     return sink.recordAgent(caseSession, agentIdentities.inputReview, {
       actor: 'agent',
       phase: 'model_preflight_result',
@@ -71,9 +70,23 @@ export function createPreflightEvents(sink: EventRecorderSink) {
       severity: parsed.action === 'dispatch' ? 'ok' : 'warn',
       summary: 'Agent 模型完成预检判断',
       detail: {
-        raw: redactSecretText(raw).slice(0, 2000),
-        parsed,
+        action: parsed.action,
+        missingInfoCount: Array.isArray(parsed.missingInfo) ? parsed.missingInfo.length : 0,
       },
+    });
+  },
+
+  answerGoalItemsReconciled(
+    caseSession: StoredCase,
+    detail: { source: 'model' | 'fallback'; count: number; fallbackReason?: string },
+  ): DiagnosticLogEvent {
+    return sink.recordAgent(caseSession, agentIdentities.inputReview, {
+      actor: 'agent',
+      phase: 'answer_goal_items_reconciled',
+      label: '答案目标',
+      severity: detail.source === 'model' ? 'ok' : 'warn',
+      summary: '答案目标子项已完成结构化校验',
+      detail,
     });
   },
 
@@ -89,9 +102,9 @@ export function createPreflightEvents(sink: EventRecorderSink) {
       severity: 'ok',
       summary: '模型预检提出泛化追问，但当前 workspace 已足够先做只读诊断',
       detail: {
-        modelDecision,
-        localDecision,
-        reason: '当前 workspace 已选中，用户问题包含可搜索业务词或功能定位意图，不应要求用户补充产品/系统/代码库归属。',
+        modelAction: modelDecision.action,
+        localAction: localDecision.action,
+        reason: 'selected_workspace_allows_bounded_read_only_dispatch',
       },
     });
   },

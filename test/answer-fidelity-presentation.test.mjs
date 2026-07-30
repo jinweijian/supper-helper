@@ -49,6 +49,37 @@ async function api() {
   return import('../dist/runtime/safe-answer-projection.js');
 }
 
+test('Gate A Presentation: production review path cannot call the raw DiagnosticResult presenter', async () => {
+  const { readFileSync } = await import('node:fs');
+  const reviewSource = readFileSync(
+    new URL('../src/runtime/review-presentation.ts', import.meta.url),
+    'utf8',
+  );
+  const failureSource = readFileSync(
+    new URL('../src/runtime/safe-failure-presentation.ts', import.meta.url),
+    'utf8',
+  );
+
+  assert.doesNotMatch(reviewSource, /from ['"]\.\/presenter\.js['"]/);
+  assert.match(reviewSource, /formatSafeWorkerFailure/);
+  assert.doesNotMatch(failureSource, /\bDiagnosticResult\b|\bEvidence\b|\bDiagnosticClaim\b/);
+});
+
+test('Gate A Presentation: safe worker failure never exposes case or run identity', async () => {
+  const { formatSafeWorkerFailure } = await import(
+    '../dist/runtime/safe-failure-presentation.js'
+  );
+  const reply = formatSafeWorkerFailure({
+    category: 'worker_execution_failed',
+    status: 'partial',
+    nextAction: 'escalate_to_human',
+    identity: { caseId: 'case_secret', runId: 'run_secret' },
+  });
+
+  assert.match(reply, /诊断未完成/);
+  assert.doesNotMatch(reply, /case_secret|run_secret|case=|run=/);
+});
+
 test('Gate A Presentation: valid model plan and fallback render the same required primary and actions', async () => {
   const { buildSafeFrozenAnswerProjection, renderSafeFrozenAnswer } = await api();
   const diagnostic = result([
@@ -82,7 +113,11 @@ test('Gate A Presentation: valid model plan and fallback render the same require
 });
 
 test('Gate A Presentation: malformed or incomplete model plan falls back to complete frozen content', async () => {
-  const { buildSafeFrozenAnswerProjection, renderSafeFrozenAnswer } = await api();
+  const {
+    buildSafeFrozenAnswerProjection,
+    renderSafeFrozenAnswer,
+    validateSafePresentationPlan,
+  } = await api();
   const projection = buildSafeFrozenAnswerProjection({
     result: result([
       claim('primary', 'primary_answer', '开启配置。'),
@@ -93,15 +128,20 @@ test('Gate A Presentation: malformed or incomplete model plan falls back to comp
     acceptedClaimIds: ['primary', 'action'],
     visiblePromptReview: { status: 'accepted', acceptedIds: [] },
   });
+  const malformedPlan = {
+    claimIds: ['primary'],
+    directAnswerClaimIds: [],
+    actionClaimIds: [],
+    evidenceIds: [],
+  };
+  const validation = validateSafePresentationPlan(malformedPlan, projection);
+  assert.equal(validation.accepted, false);
+  assert.match(validation.reason, /required|mismatch|incomplete/i);
+
   const reply = renderSafeFrozenAnswer({
     projection,
     persona: 'operations',
-    plan: {
-      claimIds: ['primary'],
-      directAnswerClaimIds: [],
-      actionClaimIds: [],
-      evidenceIds: [],
-    },
+    plan: malformedPlan,
   });
   assert.match(reply, /开启配置/);
   assert.match(reply, /保存并检查状态/);
@@ -219,7 +259,7 @@ test('Gate A Presentation: partial answer leads with preliminary judgement and l
     visiblePromptReview: { status: 'accepted', acceptedIds: [] },
   });
   const reply = renderSafeFrozenAnswer({ projection, persona: 'operations' });
-  assert.match(reply, /^\*\*初步判断：\*\*/);
+  assert.match(reply, /^\*\*针对你的问题：\*\*.+\n\n\*\*初步判断：\*\*/);
   assert.match(reply, /\*\*已确认线索：\*\*/);
   assert.match(reply, /不能作为最终结论/);
 });

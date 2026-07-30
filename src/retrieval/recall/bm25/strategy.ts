@@ -12,7 +12,7 @@ export function createBm25RecallStrategy(): RecallStrategy {
     kind: 'lexical',
     enabled: () => ({ enabled: true }),
     async recall(input: RecallInput) {
-      const loaded = readKnowledgeChunks(input.workspaceRoot);
+      const loaded = readKnowledgeChunks(input.workspaceRoot, input.knowledgeGenerationId);
       const parents = loadKnowledgeParentGrounding(input.workspaceRoot);
       const taxonomy = loadKnowledgeTaxonomy(input.workspaceRoot);
       const eligibleChunks = loaded.chunks.filter((chunk) => (

@@ -89,6 +89,18 @@ test('production retrieval evaluation reuses runtime composition and enforces sa
           split: 'holdout',
         },
       ],
+      coverageReviewer: {
+        async review(input) {
+          assert.equal(input.evidenceSegments.every((item) => Array.from(item.text).length <= 500), true);
+          if (input.questionId === 'partial-hit') {
+            return {
+              fullQuestion: 'partial',
+              missingElements: ['未被当前证据覆盖的用户可见子问题'],
+            };
+          }
+          return { fullQuestion: 'full', missingElements: [] };
+        },
+      },
       reportPath: join(workspaceRoot, 'reports', 'runtime-retrieval-eval.json'),
     });
 
@@ -106,7 +118,7 @@ test('production retrieval evaluation reuses runtime composition and enforces sa
     assert.equal(partialHit.retrievalHit, true);
     assert.equal(partialHit.answerability, 'partial');
     assert.equal(partialHit.coveredClaimCount > 0, true);
-    assert.match(partialHit.missingElements.join('\n'), /命令行|命令/);
+    assert.deepEqual(partialHit.missingElements, ['未被当前证据覆盖的用户可见子问题']);
     assert.equal(partialHit.passed, true);
     assert.equal(JSON.stringify(report).includes('课程发布后，学员需要满足'), false);
 

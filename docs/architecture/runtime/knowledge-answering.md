@@ -49,6 +49,17 @@ Knowledge Router
 
 Rerank top score 要达到 `0.70`。未运行 Rerank 时，只允许完整标题命中且至少两个非泛化多字符词匹配。BM25、向量相似度和 RRF 分数本身不能授权直答。
 
+## V4 检索制品
+
+Knowledge 检索制品采用 `parent-child-v4`：`text` 是 canonical body，
+`retrieval_text` 是最多 240 code points 的 section path 加 canonical body。BM25 分别索引
+heading field 与 canonical body；embedding/rerank 使用 `retrieval_text` 和
+`retrieval_text_hash`。非 v4、`undersized_unmergeable` 或 manual-split child 仅可调查，不得直答。
+
+索引以不可变 `generations/<id>/` 发布，`active.json` 是唯一激活指针。publisher 使用跨进程锁和
+expected-active CAS；BM25-only 仅在 embedding 明确不参与时发布，hybrid 必须同时具备 chunk 与完整
+vector artifacts。普通检索只读当前 generation，不会自动 rebuild 或写 knowledge 目录。
+
 ## 失败/降级
 
 | 场景 | 行为 |

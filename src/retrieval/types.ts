@@ -13,6 +13,8 @@ export type RecallStrategyKind = 'lexical' | 'semantic' | 'business' | 'hybrid';
 export interface RetrievalInput {
   workspaceRoot: string;
   query: string;
+  /** Runtime-owned snapshot token. Callers should not set this directly. */
+  knowledgeGenerationId?: string;
   limit?: number;
   moduleCandidates?: string[];
   intentCandidates?: string[];
@@ -55,6 +57,7 @@ export interface RetrievalCandidate {
   groundingIssues?: string[];
   taxonomyKnown?: boolean;
   text: string;
+  retrievalText?: string;
   score: number;
   finalScore?: number;
   rerankScore?: number;
@@ -76,6 +79,7 @@ export interface RetrievalResult {
 }
 
 export interface RetrievalTrace {
+  generationId?: string;
   strategies: RetrievalStrategyTrace[];
   fusion: {
     method: 'rrf' | 'none';

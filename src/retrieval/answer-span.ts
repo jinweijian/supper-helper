@@ -1,35 +1,62 @@
-const ANSWER_BEARING_PATTERNS = [
-  /(当|如果|若|在).{2,40}(时|情况|条件下|之后)/,
-  /步骤[一二三四五六七八九十0-9]+/,
-  /[一二三四五六七八九十0-9]+[.、]/,
-  /(支持|不支持|会|不会|需要|必须|返回|提示|提醒|开通|关闭|开启|启用)/,
-  /(包含|包括).{0,40}(任务|时长|时间|内容|状态|字段)/,
-  /(可以通过|可通过|可以|能).{0,30}(查看|操作|设置|管理|发送|搜索|学习|提醒|添加|删除|修改)/,
-  /学员|教师|管理员|用户|订单|课程|班级|任务|学习|计划/,
-];
-
 export function selectAnswerSpan(input: {
   text: string;
   matchedTerms?: string[];
 }): string | undefined {
-  const terms = (input.matchedTerms ?? [])
-    .map((term) => term.trim().toLowerCase())
-    .filter((term) => term.length >= 2);
-  const sentences = input.text
-    .split(/\n/)
-    .filter((line) => !/^\s*#{1,6}\s+/.test(line))
-    .flatMap((line) => line.split(/[。；;]/))
-    .map((sentence) => sentence.trim())
-    .filter(Boolean)
-    .filter((sentence) => ANSWER_BEARING_PATTERNS.some((pattern) => pattern.test(sentence)));
-  if (sentences.length === 0) {
-    return undefined;
+  const canonicalBody = normalize(input.text.replace(/^\s*#{1,6}\s+.*$/gm, ''));
+  const terms = Array.from(new Set((input.matchedTerms ?? [])
+    .map((term) => normalize(term))
+    .filter((term) => Array.from(term).length >= 2)))
+    .filter((term) => canonicalBody.includes(term));
+  if (terms.length === 0) return undefined;
+
+  const segments = splitCompleteSegments(input.text);
+  const candidates: Array<{ text: string; size: number; start: number }> = [];
+  for (let size = 1; size <= 3; size += 1) {
+    for (let start = 0; start + size <= segments.length; start += 1) {
+      const window = segments.slice(start, start + size);
+      const text = joinSegments(window);
+      if (Array.from(text).length > 500) continue;
+      const normalized = normalize(text);
+      if (terms.every((term) => normalized.includes(term))) {
+        candidates.push({ text, size, start });
+      }
+    }
   }
-  return sentences
-    .map((sentence) => ({
-      sentence,
-      matches: terms.filter((term) => sentence.toLowerCase().includes(term)).length,
-    }))
-    .sort((left, right) => right.matches - left.matches || left.sentence.length - right.sentence.length)[0]
-    ?.sentence.slice(0, 500);
+  return candidates
+    .sort((left, right) => (
+      left.size - right.size ||
+      Array.from(left.text).length - Array.from(right.text).length ||
+      left.start - right.start
+    ))[0]?.text;
+}
+
+interface CompleteSegment {
+  text: string;
+  line: number;
+}
+
+function splitCompleteSegments(text: string): CompleteSegment[] {
+  return text.split(/\n/).flatMap((line, lineIndex) => {
+    const trimmed = line.trim();
+    if (!trimmed || /^#{1,6}\s+/.test(trimmed)) return [];
+    if (/^(?:[-*+]|\d+[.)、])\s*/.test(trimmed)) {
+      return [{ text: trimmed, line: lineIndex }];
+    }
+    return (trimmed.match(/[^。！？!?;；.]+(?:[。！？!?;；.]|$)/g) ?? [])
+      .map((segment) => segment.trim())
+      .filter(Boolean)
+      .map((segment) => ({ text: segment, line: lineIndex }));
+  });
+}
+
+function joinSegments(segments: CompleteSegment[]): string {
+  return segments.reduce((result, segment, index) => {
+    if (index === 0) return segment.text;
+    const separator = segments[index - 1]!.line === segment.line ? ' ' : '\n';
+    return `${result}${separator}${segment.text}`;
+  }, '');
+}
+
+function normalize(value: string): string {
+  return value.normalize('NFKC').toLowerCase().replace(/\s+/g, '');
 }

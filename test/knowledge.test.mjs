@@ -231,7 +231,7 @@ chunking_strategy: semantic-section-v1
     assert.equal(update.chunkCount, 2);
     assert.equal(existsSync(join(knowledgeRoot, 'indexes', 'dirty.flag')), false);
 
-    const chunks = readFileSync(join(knowledgeRoot, 'indexes', 'chunks.jsonl'), 'utf8')
+    const chunks = readFileSync(update.chunksPath, 'utf8')
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line));

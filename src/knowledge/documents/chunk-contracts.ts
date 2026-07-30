@@ -19,5 +19,6 @@ export const DEFAULT_CHUNKING_OPTIONS: NormalizedChunkingOptions = {
   minChars: 80,
 };
 
-export const CURRENT_CHUNKING_STRATEGY = 'parent-child-v3';
-export const CURRENT_ARTIFACT_VERSION = 3;
+export const CURRENT_CHUNKING_STRATEGY = 'parent-child-v4';
+export const CURRENT_ARTIFACT_VERSION = 4;
+export const MAX_RETRIEVAL_SECTION_PREFIX_CODE_POINTS = 240;

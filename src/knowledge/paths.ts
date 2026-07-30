@@ -1,4 +1,6 @@
-import { join, relative, resolve, sep } from 'node:path';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { basename, join, relative, resolve, sep } from 'node:path';
 
 export function knowledgeRoot(workspaceRoot: string): string {
   return join(workspaceRoot, 'knowledge');
@@ -13,23 +15,23 @@ export function indexesDir(workspaceRoot: string): string {
 }
 
 export function manifestPath(workspaceRoot: string): string {
-  return join(indexesDir(workspaceRoot), 'manifest.json');
+  return activeArtifactPath(workspaceRoot, 'manifest.json');
 }
 
 export function keywordIndexPath(workspaceRoot: string): string {
-  return join(indexesDir(workspaceRoot), 'keyword-index.json');
+  return activeArtifactPath(workspaceRoot, 'keyword-index.json');
 }
 
 export function chunksPath(workspaceRoot: string): string {
-  return join(indexesDir(workspaceRoot), 'chunks.jsonl');
+  return activeArtifactPath(workspaceRoot, 'chunks.jsonl');
 }
 
 export function vectorsPath(workspaceRoot: string): string {
-  return join(indexesDir(workspaceRoot), 'vectors.jsonl');
+  return activeArtifactPath(workspaceRoot, 'vectors.jsonl');
 }
 
 export function vectorManifestPath(workspaceRoot: string): string {
-  return join(indexesDir(workspaceRoot), 'vector-manifest.json');
+  return activeArtifactPath(workspaceRoot, 'vector-manifest.json');
 }
 
 export function vectorBuildReportPath(workspaceRoot: string): string {
@@ -42,6 +44,65 @@ export function ingestReportPath(workspaceRoot: string): string {
 
 export function dirtyFlagPath(workspaceRoot: string): string {
   return join(indexesDir(workspaceRoot), 'dirty.flag');
+}
+
+function activeArtifactPath(workspaceRoot: string, fileName: string): string {
+  const root = indexesDir(workspaceRoot);
+  const pointerPath = join(root, 'active.json');
+  if (!existsSync(pointerPath)) return join(root, fileName);
+  try {
+    const pointer = JSON.parse(readFileSync(pointerPath, 'utf8')) as {
+      version?: unknown;
+      generation_id?: unknown;
+    };
+    const generationId = pointer.generation_id;
+    if (
+      pointer.version === 1 &&
+      typeof generationId === 'string' &&
+      basename(generationId) === generationId &&
+      /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(generationId)
+    ) {
+      const generationRoot = join(root, 'generations', generationId);
+      const manifest = JSON.parse(
+        readFileSync(join(generationRoot, 'generation-manifest.json'), 'utf8'),
+      ) as {
+        version?: unknown;
+        generation_id?: unknown;
+        chunk_artifact_version?: unknown;
+        chunking_strategy?: unknown;
+        mode?: unknown;
+        files?: unknown;
+      };
+      const complete = JSON.parse(
+        readFileSync(join(generationRoot, 'complete.json'), 'utf8'),
+      ) as {
+        version?: unknown;
+        generation_id?: unknown;
+        manifest_hash?: unknown;
+      };
+      const manifestHash = createHash('sha256')
+        .update(JSON.stringify(manifest))
+        .digest('hex');
+      if (
+        manifest.version === 1 &&
+        manifest.generation_id === generationId &&
+        manifest.chunk_artifact_version === 4 &&
+        manifest.chunking_strategy === 'parent-child-v4' &&
+        (manifest.mode === 'bm25_only' || manifest.mode === 'hybrid') &&
+        Array.isArray(manifest.files) &&
+        complete.version === 1 &&
+        complete.generation_id === generationId &&
+        complete.manifest_hash === manifestHash
+      ) {
+        // A valid active generation owns every artifact lookup. Returning the
+        // generation-local missing path prevents fallback to stale flat files.
+        return join(generationRoot, fileName);
+      }
+    }
+  } catch {
+    // Malformed active pointers never fall through to a partially written generation.
+  }
+  return join(root, fileName);
 }
 
 // Pipeline root paths

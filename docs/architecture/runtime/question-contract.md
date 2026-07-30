@@ -4,6 +4,12 @@
 
 本功能负责把用户自然语言变成当前回合的共同契约：`ResolvedTurnContext` 和 `AnswerGoal`。后续 Experience、Knowledge、Worker、Review、Presentation 都必须围绕同一个契约工作。
 
+`mustAnswerItems` 由 input-review proposer 提出 1–5 个、必须是规范化
+`resolvedQuestion` 连续子串的候选项，再由独立
+`answer-goal-completeness` reviewer 判断是否覆盖完整问题。形状、范围、完整性或 reviewer
+任一不可用时，整组回退兼容 sentinel `direct_answer`；sentinel 不是答案文本，也不会出现在用户回复。
+后续阶段只能携带这组精确字符串，不得再次拆解、改写或用问法/业务关键词表推导。
+
 ## 功能边界
 
 | 负责 | 不负责 |

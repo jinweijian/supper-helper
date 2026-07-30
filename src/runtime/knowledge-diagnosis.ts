@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import type { SuperHelperConfig } from '../config.js';
-import type { DiagnosticClaim, DiagnosticRequest, DiagnosticResult, Evidence, UserPersona } from '../domain.js';
+import type { AnswerGoal, DiagnosticClaim, DiagnosticRequest, DiagnosticResult, Evidence, UserPersona } from '../domain.js';
 import {
   discoverKnowledgeDocuments,
   knowledgeRoot,
@@ -154,7 +154,9 @@ export function diagnosticResultFromKnowledge(input: {
   judge: EvidenceJudgeResult;
   route: KnowledgeRoute;
   answerability?: RagAnswerabilityResult;
+  answerGoal?: AnswerGoal;
 }): DiagnosticResult {
+  const exactItems = input.answerGoal?.mustAnswerItems ?? [DIRECT_ANSWER_ITEM];
   const answerEvidence = input.evidencePack.results.filter((result) => result.status === 'active');
   const evidence: Evidence[] = answerEvidence.slice(0, 6).map((result) => ({
     id: result.evidence_id,
@@ -180,6 +182,7 @@ export function diagnosticResultFromKnowledge(input: {
       answerability: input.answerability,
       judge: input.judge,
       route: input.route,
+      exactItems,
     });
   }
 
@@ -187,6 +190,7 @@ export function diagnosticResultFromKnowledge(input: {
     return diagnosticFeatureOverviewResult({
       evidence,
       answerEvidence,
+      exactItems,
     });
   }
 
@@ -201,7 +205,7 @@ export function diagnosticResultFromKnowledge(input: {
         role: 'primary_answer',
         text: summary,
         evidenceIds: evidence.map((item) => item.id),
-        answers: [DIRECT_ANSWER_ITEM],
+        answers: exactItems,
       },
       {
         type: 'inference',
@@ -220,6 +224,7 @@ function diagnosticCoveredClaimsResult(input: {
   answerability: RagAnswerabilityResult;
   judge: EvidenceJudgeResult;
   route: KnowledgeRoute;
+  exactItems: string[];
 }): DiagnosticResult {
   const validEvidenceIds = new Set(input.evidence.map((item) => item.id));
   const claims: DiagnosticClaim[] = input.answerability.coveredClaims
@@ -229,7 +234,7 @@ function diagnosticCoveredClaimsResult(input: {
       role: 'primary_answer' as const,
       text: cleanKnowledgeText(claim.text),
       evidenceIds: claim.evidenceIds.filter((evidenceId) => validEvidenceIds.has(evidenceId)),
-      answers: Array.from(new Set([DIRECT_ANSWER_ITEM, ...claim.coveredRequirementIds])),
+      answers: input.exactItems.filter((item) => claim.coveredRequirementIds.includes(item)),
     }))
     .filter((claim, index, all) => (
       claim.text &&
@@ -285,6 +290,7 @@ function summarizeRagAnswerability(
 function diagnosticFeatureOverviewResult(input: {
   evidence: Evidence[];
   answerEvidence: KnowledgeEvidencePack['results'];
+  exactItems: string[];
 }): DiagnosticResult {
   const selected = input.answerEvidence.slice(0, 6);
   const claims: DiagnosticClaim[] = selected
@@ -293,7 +299,7 @@ function diagnosticFeatureOverviewResult(input: {
       role: 'primary_answer' as const,
       text: featureFactText(result),
       evidenceIds: [result.evidence_id],
-      answers: [DIRECT_ANSWER_ITEM],
+      answers: input.exactItems,
     }))
     .filter((claim, index, all) => (
       claim.text &&

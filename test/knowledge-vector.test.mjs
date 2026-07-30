@@ -15,6 +15,10 @@ import {
   vectorManifestPath,
   vectorsPath,
 } from '../dist/knowledge/index.js';
+import {
+  publishKnowledgeGeneration,
+  readActiveKnowledgeGeneration,
+} from '../dist/knowledge/generation-store.js';
 
 function tempWorkspace() {
   const workspace = mkdtempSync(join(tmpdir(), 'super-helper-kv-'));
@@ -22,24 +26,46 @@ function tempWorkspace() {
   return { workspace, indexes };
 }
 
-function writeChunks(indexes, chunks) {
-  mkdirSync(indexes, { recursive: true });
-  writeFileSync(join(indexes, 'chunks.jsonl'), chunks.map((chunk, index) => JSON.stringify({
-    artifact_version: 3,
-    chunking_strategy: 'parent-child-v3',
+let generationSequence = 0;
+
+function serializedChunks(chunks) {
+  return chunks.map((chunk, index) => JSON.stringify({
+    artifact_version: 4,
+    chunking_strategy: 'parent-child-v4',
     legacy: false,
     child_order: index + 1,
     source_block_ids: [`blk_${index + 1}`],
     section_path: ['测试'],
     quality_status: 'ok',
     ...chunk,
-  })).join('\n') + '\n', 'utf8');
+  })).join('\n') + '\n';
+}
+
+function writeFlatChunks(indexes, chunks) {
+  mkdirSync(indexes, { recursive: true });
+  writeFileSync(join(indexes, 'chunks.jsonl'), serializedChunks(chunks), 'utf8');
+}
+
+function publishChunks(workspace, chunks) {
+  const active = readActiveKnowledgeGeneration(workspace);
+  generationSequence += 1;
+  publishKnowledgeGeneration({
+    workspaceRoot: workspace,
+    files: {
+      'chunks.jsonl': serializedChunks(chunks),
+      'manifest.json': `${JSON.stringify({ version: 1, chunk_count: chunks.length })}\n`,
+      'keyword-index.json': '{}\n',
+    },
+    mode: 'bm25_only',
+    expectedActiveGenerationId: active?.generation_id,
+    generationId: `gen_fixture_${generationSequence}`,
+  });
 }
 
 test('vector builder reports completed eligible batches', async () => {
   const { workspace, indexes } = tempWorkspace();
   try {
-    writeChunks(indexes, Array.from({ length: 5 }, (_, index) => ({
+    publishChunks(workspace, Array.from({ length: 5 }, (_, index) => ({
       chunk_id: `chk_${index}`,
       parent_id: `doc_${index}`,
       source: `knowledge/faq/${index}.md`,
@@ -106,7 +132,7 @@ test('knowledge vector build writes artifacts and skips restricted chunks before
       text: 'RESTRICTED_SECRET_TEXT_SHOULD_NOT_LEAVE',
     },
   ];
-  writeChunks(indexes, chunks);
+  publishChunks(workspace, chunks);
 
   const submitted = [];
   const provider = createEmbeddingProvider({
@@ -172,7 +198,7 @@ test('knowledge vector compatibility detects missing, matching, mismatch, and st
 
   assert.equal(checkKnowledgeVectorCompatibility({ workspaceRoot: workspace, embeddingConfig: config }).status, 'missing-index');
 
-  writeChunks(indexes, [{
+  publishChunks(workspace, [{
     chunk_id: 'chk_one',
     parent_id: 'doc_one',
     source: 'knowledge/faq/one.md',
@@ -198,7 +224,7 @@ test('knowledge vector compatibility detects missing, matching, mismatch, and st
     ['model'],
   );
 
-  writeChunks(indexes, [{
+  writeFileSync(chunksPath(workspace), serializedChunks([{
     chunk_id: 'chk_one',
     parent_id: 'doc_one',
     source: 'knowledge/faq/one.md',
@@ -211,13 +237,13 @@ test('knowledge vector compatibility detects missing, matching, mismatch, and st
     headings: [],
     keywords: ['提醒'],
     text: '提醒规则已经变化',
-  }]);
+  }]), 'utf8');
   const stale = checkKnowledgeVectorCompatibility({ workspaceRoot: workspace, embeddingConfig: config });
   assert.equal(stale.status, 'rebuild-required');
   assert.deepEqual(stale.mismatches, ['source_chunks']);
 });
 
-test('knowledge vector compatibility accepts v3 chunks and rebuilds stale v2 vectors', async () => {
+test('knowledge vector compatibility accepts v4 chunks and rebuilds stale v2 vectors', async () => {
   const { workspace, indexes } = tempWorkspace();
   const config = {
     enabled: true,
@@ -228,7 +254,7 @@ test('knowledge vector compatibility accepts v3 chunks and rebuilds stale v2 vec
   };
 
   try {
-    writeChunks(indexes, [{
+    writeFlatChunks(indexes, [{
       chunk_id: 'chk_one',
       parent_id: 'doc_one',
       source: 'knowledge/faq/one.md',
@@ -247,7 +273,7 @@ test('knowledge vector compatibility accepts v3 chunks and rebuilds stale v2 vec
     const provider = createEmbeddingProvider(config);
     await buildKnowledgeVectorIndex({ workspaceRoot: workspace, provider, config });
 
-    writeChunks(indexes, [{
+    publishChunks(workspace, [{
       chunk_id: 'chk_one',
       parent_id: 'doc_one',
       source: 'knowledge/faq/one.md',
@@ -260,8 +286,8 @@ test('knowledge vector compatibility accepts v3 chunks and rebuilds stale v2 vec
       headings: [],
       keywords: ['提醒'],
       text: '提醒规则',
-      artifact_version: 3,
-      chunking_strategy: 'parent-child-v3',
+      artifact_version: 4,
+      chunking_strategy: 'parent-child-v4',
       legacy: false,
     }]);
 
@@ -269,8 +295,12 @@ test('knowledge vector compatibility accepts v3 chunks and rebuilds stale v2 vec
     assert.deepEqual(isChunkEligibleForRemoteEmbedding(loaded), { eligible: true });
 
     const stale = checkKnowledgeVectorCompatibility({ workspaceRoot: workspace, embeddingConfig: config });
-    assert.equal(stale.status, 'rebuild-required');
-    assert.deepEqual(stale.mismatches, ['source_chunks']);
+    assert.equal(stale.status, 'missing-index');
+    await buildKnowledgeVectorIndex({ workspaceRoot: workspace, provider, config });
+    assert.equal(
+      checkKnowledgeVectorCompatibility({ workspaceRoot: workspace, embeddingConfig: config }).status,
+      'compatible',
+    );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

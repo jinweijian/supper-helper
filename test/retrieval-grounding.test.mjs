@@ -199,6 +199,7 @@ test('old chunks remain readable without invented grounding defaults', async () 
     assert.equal(top.last_verified_at, undefined);
     assert.equal(top.quality, undefined);
     assert.equal(top.source_document_id, undefined);
+    assert.equal(top.grounding_issues.includes('rebuild_required'), true);
     assert.equal(result.trace.filters.some((item) => item.reason === 'missing_parent'), true);
   } finally {
     rmSync(workspaceRoot, { recursive: true, force: true });
@@ -602,7 +603,7 @@ test('knowledge direct answer uses full rag answerability covered claims', () =>
   assert.doesNotMatch(factText, /知识库命中/);
 });
 
-test('knowledge judge rejects page-description evidence that does not answer statistics backfill commands', () => {
+test('knowledge judge leaves semantic obligation coverage to independent AnswerCoverage review', () => {
   const workspaceRoot = tempWorkspace();
   try {
     const question = '学员管理的学员数据统计里面缺少6月份的数据，已经确认是定时任务没执行的问题，现在已经解决了定时任务。如何补上这个数据统计，有没有现成的命令行处理？';
@@ -633,17 +634,14 @@ test('knowledge judge rejects page-description evidence that does not answer sta
       question,
     });
 
-    assert.equal(result.answerable, false);
-    assert.equal(result.need_code_escalation, true);
-    assert.equal(result.recommended_next_action, 'dispatch_code_diagnosis');
-    assert.equal(result.blockers.includes('question_not_answered'), true);
-    assert.match(result.missing_info.join('\n'), /命令行|补统计|补跑|回补/);
+    assert.equal(result.blockers.includes('question_not_answered'), false);
+    assert.equal(Array.isArray(result.evidence), true);
   } finally {
     rmSync(workspaceRoot, { recursive: true, force: true });
   }
 });
 
-test('matched terms cannot satisfy answerability without answer-bearing text', () => {
+test('deterministic judge does not classify answer semantics with domain keyword patterns', () => {
   const result = judgeKnowledgeEvidence({
     route: route({
       normalizedQuestion: '学员统计缺少6月份如何补上，有没有命令行处理',
@@ -668,8 +666,7 @@ test('matched terms cannot satisfy answerability without answer-bearing text', (
     question: '学员统计缺少6月份如何补上，有没有命令行处理？',
   });
 
-  assert.equal(result.answerable, false);
-  assert.equal(result.blockers.includes('question_not_answered'), true);
+  assert.equal(result.blockers.includes('question_not_answered'), false);
 });
 
 test('knowledge judge can answer statistics backfill command questions when evidence contains the procedure', () => {

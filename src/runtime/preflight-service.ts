@@ -1,16 +1,17 @@
 import type { SuperHelperConfig } from '../config.js';
 import type { AgentModelClient } from '../providers/model/adapter.js';
 import type { PreflightDecision } from './preflight-decision.js';
-import { isSafetyPermissionDecision } from './preflight-decision.js';
 import type { ResolvedTurnContext } from '../domain.js';
 import type { CaseRepository, StoredCase } from '../sessions/case-repository.js';
 import { parseAgentModelJson } from './agent-model-review.js';
 import { CaseRuntimeEventRecorder } from './event-recorder.js';
 import { buildAnswerGoal } from './answer-goal.js';
-import { buildLocalPreflightDecision, isGenericWorkspaceFollowUp, summarizePreflightDecision } from './preflight-gate.js';
+import { buildLocalPreflightDecision, summarizePreflightDecision } from './preflight-gate.js';
 import { buildDiagnosticRequest } from './request-builder.js';
 import { reconcileResolvedTurnContext } from './resolved-turn.js';
 import { turnMessages } from '../sessions/turn-context-snapshot.js';
+import { AnswerGoalCompletenessReviewService } from './answer-goal-completeness-review-service.js';
+import { reconcileMustAnswerItems } from './answer-goal-reconciliation.js';
 
 export class PreflightService {
   constructor(
@@ -21,6 +22,7 @@ export class PreflightService {
     private readonly mainAgentSpec: string,
     private readonly inputReviewAgentSpec: string,
     private readonly experienceAgentSpec: string,
+    private readonly answerGoalCompletenessAgentSpec: string,
   ) {}
 
   async decide(caseSession: StoredCase, userMessage: string): Promise<PreflightDecision> {
@@ -34,11 +36,6 @@ export class PreflightService {
       caseSession,
       userMessage,
     });
-
-    if (isSafetyPermissionDecision(localDecision)) {
-      this.events.localPreflightResult(caseSession, localDecision);
-      return localDecision;
-    }
 
     if (this.config.agent.useModelForPreflight && this.config.agent.modelProvider) {
       try {
@@ -76,12 +73,12 @@ ${this.experienceAgentSpec}
 Return JSON only. Use this shape:
 {"action":"ask_user","reason":"...","missingInfo":["..."],"question":"..."}
 or
-{"action":"dispatch","reason":"...","missingInfo":[],"resolvedTurn":{"confirmedFacts":[],"userClaims":[],"hypotheses":[],"unknowns":[]}}
+{"action":"dispatch","reason":"...","missingInfo":[],"mustAnswerItems":["exact substring from resolved question"],"resolvedTurn":{"confirmedFacts":[],"userClaims":[],"hypotheses":[],"unknowns":[]}}
 
 Workspace-aware Preflight Rules:
 - The current workspace is already selected. Do not ask the user to prove which product, system, project, workspace, documentation, or codebase they mean when a current workspace exists.
-- If the user provides business terms, feature names, route/location words, config words, impact questions, or troubleshooting symptoms that can be searched in the current workspace, prefer "dispatch".
-- Ask the user only when the missing information blocks the next safe read-only action, such as no workspace, no searchable business/technical signal, or a required customer/runtime selector for a configured MCP lookup.
+- A selected workspace and a non-empty user message are enough to begin bounded read-only inspection; do not require vocabulary matches.
+- Ask the user only when the missing information blocks every safe read-only action.
 - For operations, customer, sales, and product users, do not ask for code paths before trying read-only workspace inspection.
 
 Do not include <think>, markdown, comments, explanations, or text outside the JSON object.`,
@@ -115,6 +112,7 @@ Do not include <think>, markdown, comments, explanations, or text outside the JS
       reason?: string;
       missingInfo?: string[];
       question?: string;
+      mustAnswerItems?: unknown;
       resolvedTurn?: Partial<ResolvedTurnContext>;
     }>(response);
 
@@ -139,7 +137,39 @@ Do not include <think>, markdown, comments, explanations, or text outside the JS
       if (localResolved) {
         const reconciled = reconcileResolvedTurnContext({ local: localResolved, model: parsed.resolvedTurn });
         request.context!.resolvedTurn = reconciled;
-        request.answerGoal = buildAnswerGoal({ rawUserQuestion: userMessage, resolvedTurn: reconciled });
+        const answerGoal = buildAnswerGoal({ rawUserQuestion: userMessage, resolvedTurn: reconciled });
+        const scoped = reconcileMustAnswerItems({
+          resolvedQuestion: answerGoal.resolvedQuestion,
+          proposedItems: parsed.mustAnswerItems,
+          completenessReview: {
+            status: 'complete',
+            missingElements: [],
+            reason: 'scope_validation_only',
+          },
+        });
+        const completenessReview = scoped.source === 'model'
+          ? await new AnswerGoalCompletenessReviewService(
+              this.model,
+              this.answerGoalCompletenessAgentSpec,
+            ).review({
+              resolvedQuestion: answerGoal.resolvedQuestion,
+              proposedItems: scoped.items,
+            })
+          : undefined;
+        const mustAnswerItems = reconcileMustAnswerItems({
+          resolvedQuestion: answerGoal.resolvedQuestion,
+          proposedItems: parsed.mustAnswerItems,
+          completenessReview,
+        });
+        this.events.answerGoalItemsReconciled(caseSession, {
+          source: mustAnswerItems.source,
+          count: mustAnswerItems.items.length,
+          ...(mustAnswerItems.source === 'fallback' ? { fallbackReason: mustAnswerItems.reason } : {}),
+        });
+        request.answerGoal = {
+          ...answerGoal,
+          mustAnswerItems: mustAnswerItems.items,
+        };
         request.userGoal = reconciled.resolvedQuery;
         request.knownFacts = reconciled.confirmedFacts.map((fact) => fact.text);
         request.unknowns = Array.from(new Set([...request.unknowns, ...reconciled.unknowns.map((item) => item.text)]));
@@ -160,8 +190,7 @@ Do not include <think>, markdown, comments, explanations, or text outside the JS
   ): PreflightDecision {
     if (
       modelDecision.action === 'ask_user' &&
-      localDecision.action === 'dispatch' &&
-      isGenericWorkspaceFollowUp(modelDecision.question, modelDecision.missingInfo)
+      localDecision.action === 'dispatch'
     ) {
       this.events.modelPreflightOverriddenByLocalDispatch(caseSession, modelDecision, localDecision);
       return localDecision;
@@ -169,6 +198,7 @@ Do not include <think>, markdown, comments, explanations, or text outside the JS
 
     if (modelDecision.action === 'dispatch' && localDecision.action === 'dispatch') {
       const resolvedTurn = modelDecision.request.context?.resolvedTurn ?? localDecision.request.context?.resolvedTurn;
+      const acceptedItems = [...modelDecision.request.answerGoal.mustAnswerItems];
       modelDecision.request.userGoal = resolvedTurn?.resolvedQuery ?? localDecision.request.userGoal;
       modelDecision.request.knownFacts = resolvedTurn?.confirmedFacts.map((fact) => fact.text) ?? localDecision.request.knownFacts;
       modelDecision.request.unknowns = Array.from(new Set([
@@ -179,12 +209,16 @@ Do not include <think>, markdown, comments, explanations, or text outside the JS
         ...localDecision.request.context!,
         resolvedTurn,
       };
-      modelDecision.request.answerGoal = resolvedTurn
+      const localAnswerGoal = resolvedTurn
         ? buildAnswerGoal({
             rawUserQuestion: modelDecision.request.context?.currentUserMessage ?? localDecision.request.context?.currentUserMessage ?? modelDecision.request.userGoal,
             resolvedTurn,
           })
         : localDecision.request.answerGoal;
+      modelDecision.request.answerGoal = {
+        ...localAnswerGoal,
+        mustAnswerItems: acceptedItems,
+      };
     }
 
     return modelDecision;

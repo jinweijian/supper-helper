@@ -1,4 +1,4 @@
-import { buildKnowledgeVectorIndex } from '../../knowledge/index.js';
+import { rebuildKnowledgeArtifacts } from '../../application/knowledge-rebuild-service.js';
 import { createEmbeddingProvider } from '../../providers/embedding/factory.js';
 import { formatProviderSafeError } from '../../providers/errors.js';
 import type { KnowledgeCommandContext } from './context.js';
@@ -18,11 +18,12 @@ export async function runKnowledgeVectorCommand(
   }
   try {
     const provider = createEmbeddingProvider(embedding);
-    const result = await buildKnowledgeVectorIndex({
+    const rebuilt = await rebuildKnowledgeArtifacts({
       workspaceRoot: context.knowledgeWorkspaceRoot,
-      provider,
-      config: embedding,
+      chunking: context.config.knowledge.chunking,
+      embedding: { enabled: true, provider, config: embedding },
     });
+    const result = rebuilt.vector!;
     console.log('knowledge vector index built');
     console.log(`workspace: ${context.projectWorkspaceRoot}`);
     console.log(`knowledge workspace: ${context.knowledgeWorkspaceRoot}`);

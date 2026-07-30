@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { buildKnowledgeVectorIndex } from '../dist/knowledge/index.js';
+import {
+  publishKnowledgeGeneration,
+  readActiveKnowledgeGeneration,
+} from '../dist/knowledge/generation-store.js';
 import {
   createBm25RecallStrategy,
   createEmbeddingRecallStrategy,
@@ -20,8 +24,23 @@ function tempWorkspace() {
   return { workspaceRoot, indexesRoot };
 }
 
+let generationSequence = 0;
+
 function writeChunks(indexesRoot, chunks) {
-  writeFileSync(join(indexesRoot, 'chunks.jsonl'), chunks.map((chunk) => JSON.stringify(chunk)).join('\n') + '\n', 'utf8');
+  const workspaceRoot = dirname(dirname(indexesRoot));
+  const activeGeneration = readActiveKnowledgeGeneration(workspaceRoot);
+  generationSequence += 1;
+  publishKnowledgeGeneration({
+    workspaceRoot,
+    files: {
+      'chunks.jsonl': chunks.map((chunk) => JSON.stringify(chunk)).join('\n') + '\n',
+      'manifest.json': `${JSON.stringify({ version: 1, chunk_count: chunks.length })}\n`,
+      'keyword-index.json': '{}\n',
+    },
+    mode: 'bm25_only',
+    expectedActiveGenerationId: activeGeneration?.generation_id,
+    generationId: `gen_fixture_${generationSequence}`,
+  });
 }
 
 function baseChunk(overrides) {
@@ -38,14 +57,25 @@ function baseChunk(overrides) {
     headings: overrides.headings ?? [],
     keywords: overrides.keywords ?? [],
     text: overrides.text,
-    artifact_version: 3,
-    chunking_strategy: 'parent-child-v3',
+    artifact_version: 4,
+    chunking_strategy: 'parent-child-v4',
     legacy: false,
     child_order: overrides.child_order ?? 1,
     source_block_ids: overrides.source_block_ids ?? ['blk_test'],
     section_path: overrides.section_path ?? ['测试'],
     quality_status: overrides.quality_status ?? 'ok',
   };
+}
+
+function snapshotFiles(root, prefix = '') {
+  return Object.fromEntries(readdirSync(root).flatMap((name) => {
+    const path = join(root, name);
+    const key = prefix ? `${prefix}/${name}` : name;
+    const stat = statSync(path);
+    return stat.isDirectory()
+      ? Object.entries(snapshotFiles(path, key))
+      : [[key, { size: stat.size, mtimeMs: stat.mtimeMs }]];
+  }));
 }
 
 test('BM25-only retrieval recalls local chunks without embedding provider', async () => {
@@ -76,6 +106,28 @@ test('BM25-only retrieval recalls local chunks without embedding provider', asyn
     assert.equal(result.candidates[0].chunkId, 'chk_reminder');
     assert.equal(result.trace.strategies.find((item) => item.id === 'bm25')?.status, 'ran');
     assert.equal(result.trace.rerank.status, 'skipped');
+  } finally {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('normal retrieval performs zero writes in the knowledge workspace', async () => {
+  const { workspaceRoot, indexesRoot } = tempWorkspace();
+  try {
+    writeChunks(indexesRoot, [
+      baseChunk({
+        chunk_id: 'chk_read_only',
+        text: 'Read only retrieval returns this canonical body.',
+      }),
+    ]);
+    const before = snapshotFiles(join(workspaceRoot, 'knowledge'));
+    const service = createRetrievalService({ strategies: [createBm25RecallStrategy()] });
+    await service.retrieve({
+      workspaceRoot,
+      query: 'read only retrieval canonical body',
+      limit: 1,
+    });
+    assert.deepEqual(snapshotFiles(join(workspaceRoot, 'knowledge')), before);
   } finally {
     rmSync(workspaceRoot, { recursive: true, force: true });
   }
@@ -159,6 +211,60 @@ test('retrieval service fuses enabled strategies, skips disabled strategies, and
   assert.equal(result.trace.strategies.find((item) => item.id === 'unstable')?.status, 'failed');
   assert.equal(result.trace.fusion.method, 'rrf');
   assert.equal(result.trace.fusion.dedupedCount, 1);
+});
+
+test('retrieval service pins one active knowledge generation for every recall strategy in a request', async () => {
+  const { workspaceRoot } = tempWorkspace();
+  const files = {
+    'chunks.jsonl': '',
+    'manifest.json': '{"version":1,"chunk_count":0}\n',
+    'keyword-index.json': '{}\n',
+  };
+  const seenGenerationIds = [];
+  try {
+    publishKnowledgeGeneration({
+      workspaceRoot,
+      files,
+      mode: 'bm25_only',
+      generationId: 'gen_one',
+    });
+    const service = createRetrievalService({
+      strategies: [
+        {
+          id: 'activate-next',
+          kind: 'lexical',
+          enabled: () => true,
+          async recall(input) {
+            seenGenerationIds.push(input.knowledgeGenerationId);
+            publishKnowledgeGeneration({
+              workspaceRoot,
+              files,
+              mode: 'bm25_only',
+              expectedActiveGenerationId: 'gen_one',
+              generationId: 'gen_two',
+            });
+            return { candidates: [] };
+          },
+        },
+        {
+          id: 'observe-pinned',
+          kind: 'semantic',
+          enabled: () => true,
+          async recall(input) {
+            seenGenerationIds.push(input.knowledgeGenerationId);
+            return { candidates: [] };
+          },
+        },
+      ],
+    });
+
+    await service.retrieve({ workspaceRoot, query: 'generation pin' });
+
+    assert.deepEqual(seenGenerationIds, ['gen_one', 'gen_one']);
+    assert.equal(readActiveKnowledgeGeneration(workspaceRoot)?.generation_id, 'gen_two');
+  } finally {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  }
 });
 
 test('retrieval service applies optional rerank only after fusion', async () => {
@@ -306,7 +412,7 @@ test('configured retrieval records invalid embedding safely and preserves BM25',
   }
 });
 
-test('configured retrieval rejects stale vector artifacts and preserves BM25', async () => {
+test('configured retrieval never reuses prior-generation vectors and preserves BM25', async () => {
   const { workspaceRoot, indexesRoot } = tempWorkspace();
   try {
     writeChunks(indexesRoot, [
@@ -343,7 +449,7 @@ test('configured retrieval rejects stale vector artifacts and preserves BM25', a
     assert.equal(result.candidates[0]?.chunkId, 'chk_configured_stale');
     const embeddingTrace = result.trace.strategies.find((item) => item.id === 'embedding');
     assert.equal(embeddingTrace?.status, 'failed');
-    assert.match(embeddingTrace?.reason ?? '', /source_chunks|rebuild/i);
+    assert.match(embeddingTrace?.reason ?? '', /absent|unavailable/i);
   } finally {
     rmSync(workspaceRoot, { recursive: true, force: true });
   }

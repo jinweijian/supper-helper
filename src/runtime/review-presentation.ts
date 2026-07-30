@@ -5,17 +5,18 @@ import type { StoredCase } from '../sessions/case-repository.js';
 import { parseAgentModelJson } from './agent-model-review.js';
 import type { ReviewPresentationResult } from './contracts.js';
 import { CaseRuntimeEventRecorder } from './event-recorder.js';
-import { formatReviewFailureFallback } from './presenter.js';
 import {
   caseStatusFromDiagnosticResult,
   decisionFromDiagnosticResult,
 } from './review-gate.js';
-import { validateDiagnosticResult } from './result-validator.js';
+import {
+  freezeReviewedDiagnosticResult,
+  validateDiagnosticStructure,
+} from './result-validator.js';
 import {
   AnswerCoverageService,
-  materializeCoverageReviewInput,
+  materializeCurrentCoverageReviewInput,
   unknownCoverageReview,
-  type CoverageEvidenceProvenance,
 } from './answer-coverage.js';
 import type { AnswerGoal, DiagnosticClaim, Evidence } from '../domain.js';
 import type { ReviewGlobalBlocker } from './review-gate.js';
@@ -26,8 +27,14 @@ import {
   type SafeFrozenAnswerProjection,
   type SafePresentationPlan,
   type VisiblePromptReview,
+  validateSafePresentationPlan,
 } from './safe-answer-projection.js';
 import { VisiblePromptSafetyService } from './visible-prompt-safety.js';
+import type { CoverageEvidenceEnvelope } from './coverage-evidence-provenance.js';
+import {
+  formatSafeWorkerFailure,
+  type SafeWorkerFailureCategory,
+} from './safe-failure-presentation.js';
 
 export class ReviewPresentationService {
   constructor(
@@ -45,18 +52,26 @@ export class ReviewPresentationService {
     caseSession: StoredCase,
     result: DiagnosticResult,
     run: DiagnosticRun,
+    context: { coverageEvidenceEnvelopes?: CoverageEvidenceEnvelope[] } = {},
   ): Promise<ReviewPresentationResult> {
     this.events.evidenceReviewStarted(caseSession, run, result);
     const answerGoal = run.request?.answerGoal;
-    const structural = validateDiagnosticResult(result, answerGoal);
-    const validation = this.answerCoverageAgentSpec && answerGoal
-      ? validateDiagnosticResult(
-          result,
+    const structural = validateDiagnosticStructure(result, answerGoal);
+    const coverageReview = this.answerCoverageAgentSpec && answerGoal
+      ? await this.reviewCoverage(
+          structural.result.claims,
+          structural.result.evidence,
           answerGoal,
-          await this.reviewCoverage(structural.result.claims, structural.result.evidence, answerGoal, run),
-          { blockers: upstreamGlobalBlockers(run) },
+          run,
+          context.coverageEvidenceEnvelopes ?? [],
         )
-      : structural;
+      : undefined;
+    const validation = freezeReviewedDiagnosticResult({
+      structural,
+      answerGoal: answerGoal ?? fallbackAnswerGoal(structural.result),
+      coverageReview,
+      upstreamBlockers: upstreamGlobalBlockers(run),
+    });
     let validated = validation.result;
     const promptCandidates = collectVisiblePromptCandidates({
       result: validated,
@@ -86,14 +101,11 @@ export class ReviewPresentationService {
 
     if (workerFailedBeforeUsableResult(run)) {
       return {
-        reply: formatReviewFailureFallback(
-          validated,
-          caseSession.userPersona,
-          run.request?.userGoal,
-          run.workerTrace,
-          '',
-          { caseId: caseSession.id, runId: run.id },
-        ),
+        reply: formatSafeWorkerFailure({
+          category: workerFailureCategory(run),
+          status: validated.status,
+          nextAction: validated.recommendedNextAction,
+        }),
         decision: frozenDecision,
         caseStatus,
       };
@@ -126,7 +138,7 @@ export class ReviewPresentationService {
     candidates: ReturnType<typeof collectVisiblePromptCandidates>,
   ): Promise<VisiblePromptReview> {
     if (!this.visiblePromptSafetyAgentSpec) {
-      return { status: 'accepted', acceptedIds: candidates.map((item) => item.id) };
+      return { status: 'unknown', acceptedIds: [] };
     }
     return new VisiblePromptSafetyService(
       this.model,
@@ -139,13 +151,15 @@ export class ReviewPresentationService {
     evidence: Evidence[],
     answerGoal: AnswerGoal,
     run: DiagnosticRun,
+    envelopes: CoverageEvidenceEnvelope[],
   ) {
     try {
-      const reviewInput = materializeCoverageReviewInput({
+      const reviewInput = materializeCurrentCoverageReviewInput({
         answerGoal,
         claims,
         evidence,
-        provenance: currentEvidenceProvenance(claims, evidence, answerGoal),
+        envelopes,
+        currentRunId: run.id,
       });
       return await new AnswerCoverageService(this.model, this.answerCoverageAgentSpec ?? '').review(reviewInput);
     } catch (error) {
@@ -189,8 +203,9 @@ ${this.presentationAgentSpec}
       },
     ], { json: true });
     const parsed = parseAgentModelJson<SafePresentationPlan>(response);
+    const planValidation = validateSafePresentationPlan(parsed, projection);
     this.events.modelReviewResult(caseSession, {
-      accepted: true,
+      accepted: planValidation.accepted,
       claimIds: safeStringArray(parsed.claimIds),
       evidenceIds: safeStringArray(parsed.evidenceIds),
       directAnswerClaimIds: safeStringArray(parsed.directAnswerClaimIds),
@@ -201,32 +216,6 @@ ${this.presentationAgentSpec}
       plan: parsed,
     });
   }
-}
-
-function currentEvidenceProvenance(
-  claims: DiagnosticClaim[],
-  evidence: Evidence[],
-  answerGoal: AnswerGoal,
-): Record<string, CoverageEvidenceProvenance | undefined> {
-  return Object.fromEntries(evidence.map((item) => {
-    const safeText = claims
-      .filter((claim) => claim.evidenceIds.includes(item.id))
-      .map((claim) => claim.text)
-      .join('\n')
-      .trim();
-    if (!safeText) return [item.id, undefined];
-    if (item.kind === 'workspace' || item.kind === 'mcp' || item.kind === 'log') {
-      return [item.id, { freshness: 'same_run', safeText }];
-    }
-    if (
-      item.kind === 'manual' &&
-      answerGoal.sourceMessageIds.includes(item.source)
-    ) {
-      return [item.id, { freshness: 'current_message', safeText }];
-    }
-    // Knowledge v4 freshness is supplied only after Gate C generation validation.
-    return [item.id, undefined];
-  }));
 }
 
 function upstreamGlobalBlockers(run: DiagnosticRun): ReviewGlobalBlocker[] {
@@ -265,6 +254,13 @@ function workerFailedBeforeUsableResult(run: DiagnosticRun): boolean {
   return !run.result?.evidence.some((evidence) => (
     evidence.kind !== 'log' && evidence.confidence !== 'low'
   ));
+}
+
+function workerFailureCategory(run: DiagnosticRun): SafeWorkerFailureCategory {
+  const trace = run.workerTrace;
+  if (trace?.signal) return 'worker_interrupted';
+  if (trace?.error && /timed?\s*out|timeout/i.test(trace.error)) return 'worker_timeout';
+  return 'worker_execution_failed';
 }
 
 function applyProjectionOutcome(

@@ -13,7 +13,7 @@ export function createKnowledgeRetrievalCandidate(input: {
   const frontmatter = parent?.document.frontmatter;
   const groundingIssues = [
     ...(parent ? [] : ['missing_parent']),
-    ...(chunk.legacy ? ['legacy_chunk'] : []),
+    ...(chunk.legacy ? ['legacy_chunk', 'rebuild_required'] : []),
     ...(!chunk.source_block_ids?.length ? ['missing_child_source_blocks'] : []),
     ...(!chunk.section_path?.length ? ['missing_child_section_path'] : []),
   ];
@@ -46,6 +46,7 @@ export function createKnowledgeRetrievalCandidate(input: {
     groundingIssues,
     taxonomyKnown: parent?.taxonomyKnown,
     text: chunk.text,
+    retrievalText: chunk.retrieval_text ?? chunk.text,
     score: input.score,
   };
 }

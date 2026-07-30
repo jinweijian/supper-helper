@@ -3,7 +3,7 @@ import type { UserPersona } from '../domain.js';
 import type { CaseRepository, StoredCase } from '../sessions/case-repository.js';
 import type { AcceptedUserTurn } from './contracts.js';
 import { CaseRuntimeEventRecorder } from './event-recorder.js';
-import { personaGuide, personaName } from './presenter.js';
+import { personaGuide, personaName } from './persona.js';
 
 export class SessionLifecycle {
   constructor(

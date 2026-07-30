@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -8,7 +8,8 @@ import { defaultConfig } from '../dist/config.js';
 import { preflight } from '../dist/preflight.js';
 import { findExperienceMatch, findRejectedExperienceCandidates } from '../dist/runtime/experience-agent.js';
 import { decisionFromReviewOutcome } from '../dist/runtime/review-gate.js';
-import { formatReviewFailureFallback, ruleBasedReviewAndFormat } from '../dist/runtime/presenter.js';
+import { formatSafeWorkerFailure } from '../dist/runtime/safe-failure-presentation.js';
+import { renderReviewedResultForTest as ruleBasedReviewAndFormat } from './helpers/render-reviewed-result.mjs';
 import { buildDiagnosticRequest } from '../dist/runtime/request-builder.js';
 import { buildResolvedTurnContext, reconcileResolvedTurnContext } from '../dist/runtime/resolved-turn.js';
 import { validateDiagnosticResult } from '../dist/runtime/result-validator.js';
@@ -191,7 +192,7 @@ test('diagnostic request carries answer goal for request builder and local prefl
   assert.ok(decision.request.constraints.some((item) => item.includes('DiagnosticRequest.answerGoal')));
 });
 
-test('experience binds the matching reply to its source run instead of the latest unrelated run', () => {
+test('experience keeps matching historical workspace evidence in rejected context until current-source revalidation exists', () => {
   const root = mkdtempSync(join(tmpdir(), 'super-helper-experience-binding-'));
   try {
     const store = new FileMemoryStore(root);
@@ -221,14 +222,20 @@ test('experience binds the matching reply to its source run instead of the lates
     source.status = 'concluded';
     store.saveCase(source);
 
+    const current = { ...caseSession(), createdAt: '', updatedAt: '' };
     const match = findExperienceMatch({
       store,
-      currentCase: { ...caseSession(), createdAt: '', updatedAt: '' },
+      currentCase: current,
       userMessage: firstUser.body,
     });
-    assert.equal(match.sourceRunId, 'run_first');
-    assert.equal(match.result.evidence.some((item) => item.id === 'ev_first'), true);
-    assert.equal(match.result.evidence.some((item) => item.id === 'ev_latest'), false);
+    assert.equal(match, undefined);
+    const rejected = findRejectedExperienceCandidates({
+      store,
+      currentCase: current,
+      userMessage: firstUser.body,
+    });
+    assert.equal(rejected[0].sourceRunId, 'run_first');
+    assert.equal(rejected[0].rejectionReason, 'answer_goal_unavailable');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -257,11 +264,15 @@ test('experience records stale or invisible same-scope history as rejected conte
     assert.equal(findExperienceMatch({ store, currentCase: current, userMessage: user.body }), undefined);
     const rejected = findRejectedExperienceCandidates({ store, currentCase: current, userMessage: user.body });
     assert.equal(rejected[0].sourceRunId, 'run_stale');
-    assert.equal(rejected[0].rejectionReason, 'evidence_not_current_or_visible');
+    assert.equal(rejected[0].rejectionReason, 'answer_goal_unavailable');
 
     source.runs[0].result.evidence[0].validation.lastVerifiedAt = new Date().toISOString();
     store.saveCase(source);
-    assert.equal(findExperienceMatch({ store, currentCase: current, userMessage: user.body }).sourceRunId, 'run_stale');
+    assert.equal(findExperienceMatch({ store, currentCase: current, userMessage: user.body }), undefined);
+    assert.equal(
+      findRejectedExperienceCandidates({ store, currentCase: current, userMessage: user.body })[0].rejectionReason,
+      'answer_goal_unavailable',
+    );
     assert.equal(findExperienceMatch({ store, currentCase: { ...current, userPersona: 'customer' }, userMessage: user.body }), undefined);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -372,7 +383,7 @@ test('experience match is rejected when historical answer misses current answer 
       userMessage: '班课在哪配置的',
       answerGoal: goal,
     });
-    assert.equal(rejected[0].rejectionReason, 'answer_goal_not_covered');
+    assert.equal(rejected[0].rejectionReason, 'answer_goal_not_exact');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -579,7 +590,7 @@ test('case_4e905fbc statistics backfill preserves partial RAG context and comman
   assert.doesNotMatch(reply, /设计使然/);
 });
 
-test('customer presentation translates code-review causes without leaking internal implementation details', () => {
+test('customer presentation preserves reviewed cause without adding a keyword-template rewrite', () => {
   const result = {
     status: 'concluded',
     summary: 'AI伴学助手生成学习计划时报 500，是因为生成逻辑读取 studyPlanConfig.frequency 前没有处理空配置，触发 TypeError。',
@@ -603,32 +614,42 @@ test('customer presentation translates code-review causes without leaking intern
   const reply = ruleBasedReviewAndFormat(result, 'customer', 'AI伴学助手生成学习计划时报 500');
 
   assert.match(reply, /学习计划/);
-  assert.match(reply, /无法生成|异常|人工支持/);
-  assert.doesNotMatch(reply, /studyPlanConfig|frequency|TypeError|判空|src\//);
+  assert.match(reply, /500/);
+  assert.doesNotMatch(reply, /src\/|knowledge\/_sources/);
 });
 
 test('model presentation reply is used and preserves multiple reviewed claims', async () => {
   const root = mkdtempSync(join(tmpdir(), 'super-helper-model-presentation-'));
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => chatResponse(JSON.stringify({
-    answerTarget: '班课在哪配置的',
-    directAnswer: '班课配置入口：后台管理 → 教务 → 参数设置。',
-    reply: [
-      '**班课配置入口：** 后台管理 → 教务 → 参数设置。',
-      '',
-      '**路由和权限：** 路由是 /multi_class/setting，权限节点是 admin_v2_multi_class_setting_manage。',
-      '',
-      '**可配置项：** 教师端班课设置包括基本信息、价格、封面、服务、班主任、教师、助教、课程管理和学员管理等。',
-    ].join('\n'),
-    claimIds: ['claim_1', 'claim_3'],
-    evidenceIds: ['ev_01', 'ev_02', 'ev_03', 'ev_05'],
-    directAnswerClaimIds: ['claim_1', 'claim_3'],
-  }));
+  globalThis.fetch = async (_url, init) => {
+    const request = JSON.parse(init.body);
+    const system = request.messages[0].content;
+    if (system.includes('Evidence Coverage Agent')) {
+      return chatResponse(JSON.stringify({
+        status: 'accepted',
+        bindings: [
+          { claimId: 'claim_1', answerItemIds: ['direct_answer'], evidenceIds: ['ev_01', 'ev_02', 'ev_03'] },
+          { claimId: 'claim_3', answerItemIds: ['direct_answer'], evidenceIds: ['ev_05'] },
+        ],
+        fullQuestion: 'full',
+        fullQuestionClaimIds: ['claim_1', 'claim_3'],
+        missingElements: [],
+      }));
+    }
+    if (system.includes('Visible Prompt Safety Agent')) {
+      return chatResponse(JSON.stringify({ status: 'accepted', acceptedIds: [] }));
+    }
+    return chatResponse(JSON.stringify({
+      claimIds: ['claim_1', 'claim_3'],
+      evidenceIds: ['ev_01', 'ev_02', 'ev_03', 'ev_05'],
+      directAnswerClaimIds: ['claim_1', 'claim_3'],
+      actionClaimIds: [],
+    }));
+  };
   try {
     const worker = {
       async diagnose() {
-        return {
-          result: {
+        const result = {
             status: 'concluded',
             summary: '班课配置入口位于后台管理：教务 → 参数设置。',
             missingInfo: [],
@@ -645,8 +666,17 @@ test('model presentation reply is used and preserves multiple reviewed claims', 
               { id: 'claim_3', type: 'fact', role: 'primary_answer', text: '教师端班课设置包括：基本信息、价格、封面、服务、班主任、教师、助教、课程管理、学员管理等', evidenceIds: ['ev_05'], answers: ['direct_answer'] },
             ],
             recommendedNextAction: 'final_answer',
-          },
+          };
+        return {
+          result,
           trace: { command: 'claude -p', cwd: process.cwd(), stdout: '{"result":"ok"}', stderr: '', exitCode: 0 },
+          coverageEvidence: result.evidence.map((item) => ({
+            evidenceId: item.id,
+            kind: 'workspace',
+            safeText: item.summary,
+            runId: 'run_01',
+            validated: true,
+          })),
         };
       },
     };
@@ -779,7 +809,7 @@ test('runtime ignores a model attempt to promote a frozen partial result', async
     };
     const agent = new DiagnosticRuntime(config, new FileMemoryStore(root), worker);
     const response = await agent.handleUserMessage({ message: '课程保存接口返回 500，请定位原因。' });
-    assert.equal(response.decision, 'ask_user');
+    assert.equal(response.decision, 'partial');
     assert.match(response.assistantMessage, /目前只能确认请求经过该入口/);
     assert.doesNotMatch(response.assistantMessage, /模型虚构的最终结论/);
   } finally {
@@ -807,7 +837,7 @@ test('deterministic validation rejects duplicate, missing, and low-confidence fa
     recommendedNextAction: 'final_answer',
   });
   assert.equal(validation.result.status, 'partial');
-  assert.equal(validation.result.recommendedNextAction, 'ask_user');
+  assert.equal(validation.result.recommendedNextAction, 'continue_diagnosis');
   assert.deepEqual(validation.acceptedClaimIds, []);
   assert.equal(validation.issues.some((issue) => issue.code === 'duplicate_evidence_id'), true);
   assert.equal(validation.issues.some((issue) => issue.code === 'missing_evidence_reference'), true);
@@ -819,10 +849,11 @@ test('worker failure fallback never copies raw stdout stderr or secrets into mai
   const result = {
     status: 'partial', summary: 'worker failed', missingInfo: [], evidence: [], claims: [], recommendedNextAction: 'escalate_to_human',
   };
-  const reply = formatReviewFailureFallback(result, 'operations', 'test', {
-    command: 'claude --secret', cwd: '/private/workspace', stdout: 'raw stdout sk-secret-123456', stderr: 'Authorization: Bearer token-secret',
-    exitCode: 1, error: 'stack internal', startedAt: '', finishedAt: '',
-  }, 'model also failed');
+  const reply = formatSafeWorkerFailure({
+    category: 'worker_execution_failed',
+    status: result.status,
+    nextAction: result.recommendedNextAction,
+  });
   assert.match(reply, /诊断未完成|工具调用失败/);
   assert.doesNotMatch(reply, /raw stdout|Authorization|sk-secret|token-secret|\/private\/workspace|stack internal/);
 });
@@ -844,7 +875,7 @@ test('worker trace logging is bounded and redacts contextual secrets', () => {
   assert.ok(safe.stdout.length <= 8000);
 });
 
-test('safety preflight blocks a matching historical write request before Experience', async () => {
+test('read-only safety is enforced by structured runtime constraints without matching write-request keywords', async () => {
   const root = mkdtempSync(join(tmpdir(), 'super-helper-experience-safety-'));
   try {
     const config = defaultConfig();
@@ -867,13 +898,35 @@ test('safety preflight blocks a matching historical write request before Experie
     });
     source.status = 'concluded';
     store.saveCase(source);
-    const worker = { async diagnose() { throw new Error('safety preflight must stop before worker'); } };
+    const requests = [];
+    const worker = {
+      async diagnose(request) {
+        requests.push(request);
+        return {
+          result: {
+            status: 'partial',
+            summary: '只能进行只读检查。',
+            missingInfo: [],
+            evidence: [],
+            claims: [],
+            recommendedNextAction: 'continue_diagnosis',
+          },
+          trace: { command: 'readonly', cwd: root, stdout: '', stderr: '', exitCode: 0, startedAt: '', finishedAt: '' },
+        };
+      },
+    };
     const agent = new DiagnosticRuntime(config, store, worker);
     const response = await agent.handleUserMessage({ message: user.body });
 
-    assert.equal(response.decision, 'ask_user');
-    assert.match(response.assistantMessage, /当前只允许只读诊断/);
-    assert.equal(response.caseSession.logs.some((event) => event.phase === 'experience_started'), false);
+    assert.equal(requests.length > 0, true);
+    assert.equal(requests.every((request) => (
+      request.constraints.some((item) => /read-only permission boundary/i.test(item))
+    )), true);
+    assert.notEqual(response.decision, 'final');
+    assert.doesNotMatch(
+      readFileSync(new URL('../src/runtime/preflight-decision.ts', import.meta.url), 'utf8'),
+      /如何\|怎么|删除\|清空|writeAction|requiresPermissionEscalation/,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

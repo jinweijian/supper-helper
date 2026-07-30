@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildKnowledgeChunks, type KnowledgeChunkingOptions } from '../documents/chunks.js';
 import { discoverKnowledgeDocuments, loadSourceDocuments } from '../documents/discovery.js';
@@ -19,11 +19,18 @@ import {
 } from '../quality.js';
 import type { KnowledgeChunk, KnowledgeIndexManifest, KnowledgeUpdateResult } from '../types.js';
 import { validateKnowledgeTaxonomyCoverage } from '../taxonomy.js';
+import { publishKnowledgeGeneration, readActiveKnowledgeGeneration } from '../generation-store.js';
 
-export function updateKnowledgeIndex(input: {
+export interface PreparedKnowledgeIndexGeneration {
+  result: KnowledgeUpdateResult;
+  chunks: KnowledgeChunk[];
+  files: Record<'chunks.jsonl' | 'manifest.json' | 'keyword-index.json', string>;
+}
+
+export function prepareKnowledgeIndexGeneration(input: {
   workspaceRoot: string;
   chunking?: KnowledgeChunkingOptions;
-}): KnowledgeUpdateResult {
+}): PreparedKnowledgeIndexGeneration {
   const root = knowledgeRoot(input.workspaceRoot);
   const docs = discoverKnowledgeDocuments(input.workspaceRoot);
   const sourceDocuments = loadSourceDocuments(input.workspaceRoot);
@@ -53,23 +60,51 @@ export function updateKnowledgeIndex(input: {
       unknown_modules: taxonomy.unknownModules,
     },
   };
-
-  mkdirSync(join(root, 'indexes'), { recursive: true });
-  writeFileSync(chunksPath(input.workspaceRoot), chunks.map((chunk) => JSON.stringify(chunk)).join('\n') + (chunks.length ? '\n' : ''), 'utf8');
-  writeFileSync(manifestPath(input.workspaceRoot), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-  writeFileSync(keywordIndexPath(input.workspaceRoot), `${JSON.stringify(buildKeywordIndex(chunks), null, 2)}\n`, 'utf8');
-  if (existsSync(dirtyFlagPath(input.workspaceRoot))) {
-    rmSync(dirtyFlagPath(input.workspaceRoot), { force: true });
-  }
-
   return {
-    knowledgeRoot: root,
-    documentCount: docs.length,
-    chunkCount: chunks.length,
-    sourceDocumentCount: sourceDocuments.length,
-    manifestPath: manifestPath(input.workspaceRoot),
-    chunksPath: chunksPath(input.workspaceRoot),
-    taxonomyWarnings: taxonomy.unknownModules.map((module) => `unknown_module:${module}`),
+    chunks,
+    files: {
+      'chunks.jsonl': chunks.map((chunk) => JSON.stringify(chunk)).join('\n') + (chunks.length ? '\n' : ''),
+      'manifest.json': `${JSON.stringify(manifest, null, 2)}\n`,
+      'keyword-index.json': `${JSON.stringify(buildKeywordIndex(chunks), null, 2)}\n`,
+    },
+    result: {
+      knowledgeRoot: root,
+      documentCount: docs.length,
+      chunkCount: chunks.length,
+      sourceDocumentCount: sourceDocuments.length,
+      manifestPath: manifestPath(input.workspaceRoot),
+      chunksPath: chunksPath(input.workspaceRoot),
+      taxonomyWarnings: taxonomy.unknownModules.map((module) => `unknown_module:${module}`),
+    },
+  };
+}
+
+export function updateKnowledgeIndex(input: {
+  workspaceRoot: string;
+  chunking?: KnowledgeChunkingOptions;
+}): KnowledgeUpdateResult {
+  const prepared = prepareKnowledgeIndexGeneration(input);
+  mkdirSync(join(prepared.result.knowledgeRoot, 'indexes'), { recursive: true });
+  publishKnowledgeGeneration({
+    workspaceRoot: input.workspaceRoot,
+    expectedActiveGenerationId: readActiveKnowledgeGeneration(input.workspaceRoot)?.generation_id,
+    mode: 'bm25_only',
+    files: prepared.files,
+  });
+  return finalizeKnowledgeIndexGeneration(input.workspaceRoot, prepared.result);
+}
+
+export function finalizeKnowledgeIndexGeneration(
+  workspaceRoot: string,
+  result: KnowledgeUpdateResult,
+): KnowledgeUpdateResult {
+  if (existsSync(dirtyFlagPath(workspaceRoot))) {
+    rmSync(dirtyFlagPath(workspaceRoot), { force: true });
+  }
+  return {
+    ...result,
+    manifestPath: manifestPath(workspaceRoot),
+    chunksPath: chunksPath(workspaceRoot),
   };
 }
 

@@ -21,6 +21,16 @@ export interface McpEvidenceServiceOptions {
   resolveSecret?: Parameters<typeof executeMcpTool>[0]['resolveSecret'];
 }
 
+export interface CurrentMcpCoverageEvidence {
+  evidenceId: string;
+  safeText: string;
+  runId: string;
+  validated: boolean;
+  readOnly: boolean;
+  allowlisted: boolean;
+  completed: boolean;
+}
+
 export class McpEvidenceService {
   private readonly createClient: McpClientFactory;
 
@@ -106,6 +116,47 @@ export class McpEvidenceService {
     }
     return undefined;
   }
+
+  currentCoverageEvidence(request: DiagnosticRequest): CurrentMcpCoverageEvidence[] {
+    return (request.context?.mcp?.calls ?? []).flatMap((call) => {
+      if (
+        call.status !== 'completed' ||
+        !call.evidenceId ||
+        !call.result ||
+        !call.result.structuredContent
+      ) return [];
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(call.result.structuredContent) as Record<string, unknown>;
+      } catch {
+        return [];
+      }
+      if (!EvidenceEnvelopeSchema.safeParse(parsed.superHelperEvidence).success) return [];
+      const targetEvidence = request.context?.mcp?.evidence.find((item) => item.id === call.evidenceId);
+      if (targetEvidence?.confidence !== 'high') return [];
+      const server = this.config.mcpTools.find((item) => item.id === call.serverId);
+      const readOnly = server?.permission === 'read_only';
+      const allowlisted = Boolean(
+        server?.enabled &&
+        request.allowedMcpToolIds.includes(call.serverId) &&
+        server.allowedToolNames?.includes(call.toolName),
+      );
+      const safeText = call.result.text
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!safeText || Array.from(safeText).length > 1000) return [];
+      return [{
+        evidenceId: call.evidenceId,
+        safeText,
+        runId: request.runId,
+        validated: true,
+        readOnly,
+        allowlisted,
+        completed: true,
+      }];
+    });
+  }
 }
 
 function extractExplicitResult(
@@ -127,13 +178,16 @@ function extractExplicitResult(
     const targetEvidence = evidence.find((item) => item.id === call.evidenceId);
     if (targetEvidence) targetEvidence.confidence = 'high';
     for (const [index, claim] of envelope.data.claims.entries()) {
+      const exactAnswers = claim.role === 'primary_answer'
+        ? request.answerGoal.mustAnswerItems.filter((item) => claim.answers.includes(item))
+        : [];
       claims.push({
         id: `mcp_claim_${claims.length + index + 1}`,
         type: claim.type,
         role: claim.role,
         text: claim.text,
         evidenceIds: [call.evidenceId],
-        answers: claim.answers,
+        answers: exactAnswers,
       });
     }
   }

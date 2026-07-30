@@ -38,18 +38,21 @@ export interface KnowledgeChunk {
   headings: string[];
   keywords: string[];
   text: string;
+  retrieval_text?: string;
   child_order?: number;
   source_block_ids?: string[];
   section_path?: string[];
   text_hash?: string;
+  retrieval_text_hash?: string;
   parent_title?: string;
   parent_terms?: string[];
   quality_status?: 'unchecked' | 'ok' | 'warn' | 'error';
   chunking_strategy?: string;
-  artifact_version?: 2 | 3;
+  artifact_version?: 2 | 3 | 4;
   legacy?: boolean;
   manual_split_required?: boolean;
   overlap_chars?: number;
+  undersized_unmergeable?: boolean;
 }
 
 export interface KnowledgeVectorRecord {

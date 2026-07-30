@@ -132,6 +132,16 @@
       "summary": "证据覆盖 Agent，用模型判断知识证据是否真正覆盖原问题需要的答案要素。"
     },
     {
+      "id": "answer-goal-completeness",
+      "role": "answer-goal-completeness-review",
+      "stage": "answer_goal_completeness",
+      "configPath": "answer-goal-completeness.md",
+      "required": true,
+      "mayProduceUserFacingText": false,
+      "executionMode": "model_assisted",
+      "summary": "AnswerGoal 完整性审核 Agent，独立判断 proposer 是否覆盖完整用户问题。"
+    },
+    {
       "id": "visible-prompt-safety",
       "role": "visible-prompt-safety-review",
       "stage": "visible_prompt_safety",

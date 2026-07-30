@@ -4,6 +4,10 @@
 
 当历史经验和知识库不能完整回答 `AnswerGoal` 时，Runtime 才升级只读 Worker。Worker 是工具，不是产品 Agent；它返回结构化结果，不能直接回复用户。
 
+可执行修复必须作为 `role=next_action` claim，绑定相关 evidence ID 和当前精确
+must-answer item，并声明 worker-only `actionSafety` 与 `executionStatus=proposed`。写配置、部署、
+删除或覆盖等变更只能标记 `requires_authorization`，不能声称已执行；parser 会丢弃缺少该结构的 action。
+
 当前默认 Worker adapter 是 Claude Code Worker。
 
 ## 功能边界
