@@ -83,6 +83,7 @@ export class ReviewPresentationService {
       answerGoal: answerGoal ?? fallbackAnswerGoal(validated),
       frozenPrimaryClaimIds: validation.acceptedPrimaryAnswerClaimIds,
       acceptedClaimIds: validation.acceptedClaimIds,
+      reviewedBindingClaimIds: reviewedBindingClaimIds(coverageReview),
       visiblePromptReview,
     });
     validated = applyProjectionOutcome(validated, projection);
@@ -91,6 +92,7 @@ export class ReviewPresentationService {
       answerGoal: answerGoal ?? fallbackAnswerGoal(validated),
       frozenPrimaryClaimIds: validation.acceptedPrimaryAnswerClaimIds,
       acceptedClaimIds: validation.acceptedClaimIds,
+      reviewedBindingClaimIds: reviewedBindingClaimIds(coverageReview),
       visiblePromptReview,
     });
     run.result = validated;
@@ -216,6 +218,11 @@ ${this.presentationAgentSpec}
       plan: parsed,
     });
   }
+}
+
+function reviewedBindingClaimIds(review: Awaited<ReturnType<ReviewPresentationService['reviewCoverage']>> | undefined): string[] {
+  if (review?.status !== 'accepted') return [];
+  return Array.from(new Set(review.bindings.map((binding) => binding.claimId)));
 }
 
 function upstreamGlobalBlockers(run: DiagnosticRun): ReviewGlobalBlocker[] {

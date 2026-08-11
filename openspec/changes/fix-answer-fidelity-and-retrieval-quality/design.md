@@ -412,7 +412,7 @@ Claude worker prompt 与 contract tests要求：
 6. v3 readable-but-ineligible，v4 原子 rebuild 成功/失败回滚；
 7. 多步骤 span 完整或 abstain，不输出截断伪答案。
 
-真实 provider/真实知识库验收只能由唯一具名开关 `SUPER_HELPER_REAL_ACCEPTANCE=1` 触发，并单独记录 `PASS`、`FAIL` 或 `NOT_RUN`；没有该开关时，即使环境中存在真实凭据，acceptance harness 也不得读取或联网。`NOT_RUN` 不能抵消离线验收失败，也不能记为完成证据。该 gate 只约束验收命令，不改变用户正常配置下的生产 provider 行为。
+真实 provider/真实知识库验收只能由唯一具名开关 `SUPER_HELPER_REAL_ACCEPTANCE=1` 触发，并单独记录 `PASS`、`FAIL` 或 `NOT_RUN`；没有该开关时，即使环境中存在真实凭据，acceptance harness 也不得读取或联网。用户明确要求真实端到端验收后，harness 必须走正式 `/api/chat`、会话持久化、runtime、真实 worker/provider、独立 review 与 Presentation 路径，验证多项 AnswerGoal 覆盖、代码证据、整份回复安全和 reviewed `final_answer`，并在 finally 删除验收 case、关闭临时 server。`NOT_RUN`、partial 或知识质量 gate 失败均不能记为完成证据。该 gate 只约束验收命令，不改变用户正常配置下的生产 provider 行为。
 
 ## Module Ownership
 

@@ -39,6 +39,7 @@ export function renderReviewedResultForTest(
     answerGoal,
     frozenPrimaryClaimIds,
     acceptedClaimIds,
+    reviewedBindingClaimIds: acceptedClaimIds,
     visiblePromptReview: {
       status: 'accepted',
       acceptedIds: promptCandidates.map((item) => item.id),

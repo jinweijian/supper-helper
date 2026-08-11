@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -485,6 +485,46 @@ test('embedding CLI reports disabled state without calling network', () => {
   assert.equal(result.status, 0);
   assert.match(result.stdout, /embedding disabled/);
   assert.doesNotMatch(result.stdout, /embedding:/);
+});
+
+test('provider CLI materializes file SecretRefs before smoke tests', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'super-helper-provider-secret-cli-'));
+  const config = defaultConfig();
+  config.storage.rootDir = home;
+  config.knowledge.rootDir = join(home, 'knowledge');
+  config.embedding.apiKeyRef = { source: 'file', key: 'providers.embedding' };
+  writeFileSync(join(home, 'config.json'), `${JSON.stringify(config, null, 2)}\n`);
+  writeFileSync(join(home, 'secrets.json'), `${JSON.stringify({
+    version: 1,
+    values: { 'providers.embedding': 'file-secret-value' },
+  }, null, 2)}\n`);
+  const { loadProviderCommandConfig } = await import('../dist/cli/command-provider.js');
+
+  const loaded = loadProviderCommandConfig(home);
+
+  assert.equal(loaded.embedding.apiKey, 'file-secret-value');
+  assert.equal(loaded.embedding.apiKeyRef.key, 'providers.embedding');
+});
+
+test('provider CLI --home is read-only and cannot follow an embedded external storage root', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'super-helper-provider-home-boundary-'));
+  const outside = mkdtempSync(join(tmpdir(), 'super-helper-provider-outside-boundary-'));
+  try {
+    const config = defaultConfig();
+    config.storage.rootDir = outside;
+    config.embedding.enabled = false;
+    writeFileSync(join(home, 'config.json'), `${JSON.stringify(config, null, 2)}\n`);
+    writeFileSync(join(outside, 'config.json'), '{"sentinel":"unchanged"}\n');
+    const { loadProviderCommandConfig } = await import('../dist/cli/command-provider.js');
+
+    const loaded = loadProviderCommandConfig(home);
+
+    assert.equal(loaded.storage.rootDir, home);
+    assert.equal(readFileSync(join(outside, 'config.json'), 'utf8'), '{"sentinel":"unchanged"}\n');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 test('embedding error helpers redact secrets from nested values', () => {

@@ -66,13 +66,18 @@ export function validateAnswerCoverageReview(
       !claimById.has(binding.claimId) ||
       !isUniqueStringArray(binding.answerItemIds) ||
       !isUniqueStringArray(binding.evidenceIds) ||
+      binding.answerItemIds.length === 0 ||
+      binding.evidenceIds.length === 0 ||
       binding.answerItemIds.some((item) => !answerItems.has(item)) ||
       binding.evidenceIds.some((id) => !evidenceIds.has(id))
     ) {
       return unknownCoverageReview('invalid coverage binding');
     }
     const claim = claimById.get(binding.claimId)!;
-    if (binding.evidenceIds.some((id) => !claim.evidenceIds.includes(id))) {
+    if (
+      binding.answerItemIds.some((item) => !claim.candidateAnswerItemIds.includes(item)) ||
+      binding.evidenceIds.some((id) => !claim.evidenceIds.includes(id))
+    ) {
       return unknownCoverageReview('coverage binding evidence mismatch');
     }
     bindings.push({
@@ -91,7 +96,14 @@ export function validateAnswerCoverageReview(
       item.trim().length > 0 &&
       Array.from(item.trim()).length <= 160
     )) ||
-    (candidate.fullQuestion === 'full' && candidate.missingElements.length > 0)
+    (candidate.fullQuestion === 'full' && (
+      candidate.missingElements.length > 0 ||
+      candidate.fullQuestionClaimIds.length === 0 ||
+      candidate.fullQuestionClaimIds.some((id) => (
+        claimById.get(id)?.role !== 'primary_answer' ||
+        !bindings.some((binding) => binding.claimId === id)
+      ))
+    ))
   ) {
     return unknownCoverageReview('invalid full-question coverage');
   }

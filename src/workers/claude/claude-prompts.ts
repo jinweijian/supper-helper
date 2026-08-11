@@ -27,10 +27,12 @@ Workspace inspection requirements:
 - For broad product questions, derive bounded search queries from the current question's entities and concepts; do not classify or route the request with a fixed keyword list.
 - If no relevant files are found, cite the exact Glob/Grep queries you tried as low-confidence workspace evidence.
 - Do not cite paths outside the active workspace root as workspace evidence.
+- Every workspace evidence source must be a current workspace file locator in the exact form "relative/path:startLine-endLine". The cited line range must be the smallest complete span that directly supports the claim; a bare path, invented locator, directory, or summary-only citation is ineligible for final coverage.
 - Do not use a missing top-level CLAUDE.md as the only workspace evidence when subdirectories may contain README.md, CLAUDE.md, AGENTS.md, docs, or source files.
 - Return need_input only after this minimum inspection cannot identify enough evidence or when a runtime/customer selector is truly required.
 If inspection finds partial evidence but not enough for a conclusion, return status "partial" with missingInfo.
 Return "final_answer" only when at least one fact/inference claim has role "primary_answer" and its answers cover every DiagnosticRequest.answerGoal.mustAnswerItems item.
+When evidence-supported primary_answer claims answer every DiagnosticRequest.answerGoal.mustAnswerItems item and missingInfo is empty, you MUST return status "concluded" with recommendedNextAction "final_answer"; do not keep a fully answered read-only inspection partial merely because no code change was executed.
 Put every evidence-supported configuration or remediation step in a claim with role "next_action"; do not leave an actionable step only in summary or process_note.
 Every next_action must bind relevant evidence IDs and exact current answerGoal.mustAnswerItems strings.
 Every next_action must additionally declare actionSafety as "read_only" or "requires_authorization" and executionStatus as "proposed".
@@ -47,7 +49,7 @@ Return this JSON shape:
     {
       "id": "ev_01",
       "kind": "workspace | mcp | manual | knowledge | history | log | unknown",
-      "source": "source name or path",
+      "source": "relative/path:startLine-endLine for workspace evidence",
       "summary": "what this evidence supports",
       "confidence": "low | medium | high"
     }

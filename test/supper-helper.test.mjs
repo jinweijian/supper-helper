@@ -110,6 +110,71 @@ function chatResponse(content) {
   );
 }
 
+function reviewStageResponse(init) {
+  const request = JSON.parse(init.body);
+  const system = request.messages?.[0]?.content ?? '';
+  const user = request.messages?.find((message) => message.role === 'user')?.content ?? '{}';
+  if (system.includes('Evidence Coverage Agent')) {
+    const input = JSON.parse(user);
+    const bindings = input.claimSegments
+      .filter((item) => item.candidateAnswerItemIds.length > 0 && item.evidenceIds.length > 0)
+      .map((item) => ({
+        claimId: item.id,
+        answerItemIds: item.candidateAnswerItemIds,
+        evidenceIds: item.evidenceIds,
+      }));
+    const fullQuestionClaimIds = input.claimSegments
+      .filter((item) => item.role === 'primary_answer' && bindings.some((binding) => binding.claimId === item.id))
+      .map((item) => item.id);
+    return chatResponse(JSON.stringify({
+      status: 'accepted',
+      bindings,
+      fullQuestion: fullQuestionClaimIds.length > 0 ? 'full' : 'none',
+      fullQuestionClaimIds,
+      missingElements: fullQuestionClaimIds.length > 0 ? [] : ['当前没有主答候选'],
+    }));
+  }
+  if (system.includes('Visible Prompt Safety Agent')) {
+    const input = JSON.parse(user);
+    return chatResponse(JSON.stringify({
+      status: 'accepted',
+      acceptedIds: (input.candidates ?? []).map((item) => item.id),
+    }));
+  }
+  return undefined;
+}
+
+function presentationPlanResponse(init) {
+  const request = JSON.parse(init.body);
+  const user = request.messages?.find((message) => message.role === 'user')?.content ?? '{}';
+  const projection = JSON.parse(user).projection;
+  return chatResponse(JSON.stringify({
+    claimIds: [
+      ...projection.primary.map((item) => item.id),
+      ...projection.actions.map((item) => item.id),
+      ...projection.supporting.map((item) => item.id),
+    ],
+    evidenceIds: projection.evidence.map((item) => item.id),
+    directAnswerClaimIds: projection.primary.map((item) => item.id),
+    actionClaimIds: projection.actions.map((item) => item.id),
+  }));
+}
+
+function withTestCoverageEvidence(response, request) {
+  return {
+    ...response,
+    coverageEvidence: response.result.evidence
+      .filter((item) => item.kind === 'workspace' && item.confidence !== 'low')
+      .map((item) => ({
+        evidenceId: item.id,
+        kind: 'workspace',
+        safeText: `测试只读适配器已重验 ${item.id}`,
+        runId: request.runId,
+        validated: true,
+      })),
+  };
+}
+
 async function waitFor(assertion, timeoutMs = 2000) {
   const startedAt = Date.now();
   let lastError;
@@ -1237,7 +1302,7 @@ test('config defaults missing knowledge storage under the configured storage roo
   }
 });
 
-test('runtime answers directly from knowledge evidence before calling the worker', async () => {
+test('runtime keeps unreviewed knowledge evidence non-final when no coverage model is available', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
   const workspace = mkdtempSync(join(tmpdir(), 'super-helper-kb-workspace-'));
   const workerRequests = [];
@@ -1295,7 +1360,8 @@ test('runtime answers directly from knowledge evidence before calling the worker
     assert.equal(response.caseSession.runs.length, 1);
     assert.equal(response.caseSession.runs[0].result.evidence[0].kind, 'knowledge');
     assert.match(response.assistantMessage, /AI伴学助手如何制定学习计划/);
-    assert.match(response.assistantMessage, /\*\*初步判断：/);
+    assert.doesNotMatch(response.assistantMessage, /\*\*初步判断：/);
+    assert.match(response.assistantMessage, /证据不足|无法形成.*结论|还不能形成.*结论/);
     assert.doesNotMatch(response.assistantMessage, /支撑证据/);
     assert.match(response.caseSession.runs[0].result.evidence[0].source, /knowledge\/faq\/ai-companion/);
     assert.equal(response.caseSession.logs.some((event) => event.phase === 'knowledge_search_result'), true);
@@ -1312,7 +1378,7 @@ test('runtime answers directly from knowledge evidence before calling the worker
   }
 });
 
-test('runtime broadens source type filters so whitepaper evidence can answer natural how-to questions', async () => {
+test('runtime retrieves broader whitepaper sources but does not expose facts without coverage review', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'super-helper-test-'));
   const workspace = mkdtempSync(join(tmpdir(), 'super-helper-kb-workspace-'));
   const workerRequests = [];
@@ -1349,7 +1415,8 @@ test('runtime broadens source type filters so whitepaper evidence can answer nat
     assert.equal(workerRequests.length, 0);
     assert.equal(response.decision, 'partial');
     assert.match(response.assistantMessage, /学习日晚上8点/);
-    assert.match(response.assistantMessage, /APP通知/);
+    assert.doesNotMatch(response.assistantMessage, /APP通知/);
+    assert.match(response.assistantMessage, /证据不足|无法形成.*结论|还不能形成.*结论/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(workspace, { recursive: true, force: true });
@@ -1363,6 +1430,8 @@ test('runtime carries partial RAG claims into code escalation instead of discard
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, init = {}) => {
     const body = JSON.parse(init.body);
+    const reviewResponse = reviewStageResponse(init);
+    if (reviewResponse) return reviewResponse;
     const userContent = body.messages?.find((message) => message.role === 'user')?.content ?? '{}';
     let payload = {};
     try {
@@ -1388,12 +1457,12 @@ test('runtime carries partial RAG claims into code escalation instead of discard
         reason: '知识库只覆盖制定方式，缺入口和验证方式。',
       }));
     }
-    return chatResponse('{bad json');
+    return presentationPlanResponse(init);
   };
   const worker = {
     async diagnose(request) {
       workerRequests.push(request);
-      return {
+      return withTestCoverageEvidence({
         result: {
           status: 'concluded',
           summary: '知识库确认制定方式，代码确认入口和验证方式。',
@@ -1416,7 +1485,7 @@ test('runtime carries partial RAG claims into code escalation instead of discard
           startedAt: new Date().toISOString(),
           finishedAt: new Date().toISOString(),
         },
-      };
+      }, request);
     },
   };
 
@@ -1654,16 +1723,18 @@ test('runtime skips legacy coverage agent when rag answerability has no model pr
     const store = new FileMemoryStore(dir);
     const agent = new DiagnosticRuntime(config, store, worker);
 
-    await agent.handleUserMessage({
+    const response = await agent.handleUserMessage({
       message: '学员数据统计缺失如何补跑，有没有现成命令行处理？',
       workspaceId: 'current',
     });
 
-    assert.equal(workerRequests.length, 0, 'missing rag answerability model should fall back to Evidence Judge direct answer');
+    assert.equal(workerRequests.length, 0, 'missing coverage reviewer should not trigger an unrelated worker dispatch');
+    assert.doesNotMatch(response.assistantMessage, /student:statistics:rebuild/);
+    assert.match(response.assistantMessage, /证据不足|无法形成.*结论|还不能形成.*结论/);
 
     const cases = store.listCases();
-    const caseSession = cases.find((c) => c.messages.some((message) => /student:statistics:rebuild|补跑指定月份/.test(message.body)));
-    assert.ok(caseSession, 'case should have direct knowledge answer');
+    const caseSession = cases.find((c) => c.id === response.caseSession.id);
+    assert.ok(caseSession);
     assert.equal(caseSession.logs.some((log) => log.phase === 'evidence_coverage_result'), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -2351,6 +2422,7 @@ test('context usage limit follows the current model context window', async () =>
     config.agent.useModelForPreflight = false;
     config.claude.enabled = false;
     config.agent.contextWindowTokens = 200000;
+    config.models.providers.minimax.baseUrl = 'http://127.0.0.1:43975/v1';
     server = await startServer({ config });
 
     const accepted = await fetch('http://127.0.0.1:43975/api/chat', {
@@ -2368,7 +2440,7 @@ test('context usage limit follows the current model context window', async () =>
       const json = await fetch(`http://127.0.0.1:43975/api/session?caseId=${accepted.caseId}`).then((res) => res.json());
       assert.equal(json.session.messages.length >= 2, true);
       return json;
-    });
+    }, 5000);
 
     assert.equal(loaded.session.contextUsage.limitTokens, 1000000);
   } finally {
@@ -2650,7 +2722,7 @@ test('agent model runs before Claude dispatch and after Claude returns', async (
     modelCalls.push(body.messages);
     assert.deepEqual(body.response_format, { type: 'json_object' });
 
-    if (modelCalls.length === 1) {
+    if (body.messages[0].content.includes('Return JSON only. Use this shape:')) {
       return chatResponse(
         JSON.stringify({
           action: 'dispatch',
@@ -2659,20 +2731,16 @@ test('agent model runs before Claude dispatch and after Claude returns', async (
         }),
       );
     }
-
-    return chatResponse(
-      JSON.stringify({
-        claimIds: ['claim_1'],
-        evidenceIds: ['ev_01'],
-      }),
-    );
+    const reviewResponse = reviewStageResponse(init);
+    if (reviewResponse) return reviewResponse;
+    return presentationPlanResponse(init);
   };
 
   try {
     const store = new FileMemoryStore(dir);
     const worker = {
-      async diagnose() {
-        return {
+      async diagnose(request) {
+        return withTestCoverageEvidence({
           result: {
             status: 'concluded',
             summary: 'worker result',
@@ -2704,7 +2772,7 @@ test('agent model runs before Claude dispatch and after Claude returns', async (
             stderr: '',
             exitCode: 0,
           },
-        };
+        }, request);
       },
     };
 
@@ -2713,12 +2781,13 @@ test('agent model runs before Claude dispatch and after Claude returns', async (
       message: '课程任务保存失败，接口 /course/1/task/2/update 返回 500，账号是管理员。',
     });
 
-    assert.equal(modelCalls.length, 2);
-    assert.match(modelCalls[1][0].content, /只负责.*claim\/evidence ID/);
-    assert.doesNotMatch(modelCalls[1][1].content, /claude -p|stdout|stderr/);
-    assert.match(response.assistantMessage, /\*\*初步判断：/);
+    const presentationCall = modelCalls.find((messages) => messages[0].content.includes('你只负责选择已通过确定性审核'));
+    assert.ok(presentationCall);
+    assert.match(presentationCall[0].content, /只负责.*claim\/evidence ID/);
+    assert.doesNotMatch(presentationCall[1].content, /claude -p|stdout|stderr/);
+    assert.match(response.assistantMessage, /\*\*结论：/);
     assert.match(response.assistantMessage, /存在可验证证据/);
-    assert.equal(response.decision, 'partial');
+    assert.equal(response.decision, 'final');
     assert.equal(response.caseSession.logs.some((item) => item.actor === 'claude' && item.phase === 'raw_output'), true);
   } finally {
     globalThis.fetch = originalFetch;
@@ -2739,15 +2808,17 @@ test('agent falls back to local reviewed formatting when presentation model retu
 }
 \`\`\``;
 
-  globalThis.fetch = async () => chatResponse('{"outcome":"final_answer","reply":"未闭合的模型回复');
+  globalThis.fetch = async (_url, init) => (
+    reviewStageResponse(init) ?? chatResponse('{"outcome":"final_answer","reply":"未闭合的模型回复')
+  );
 
   try {
     const config = baseConfig(dir);
     config.agent.useModelForPreflight = false;
     const store = new FileMemoryStore(dir);
     const worker = {
-      async diagnose() {
-        return {
+      async diagnose(request) {
+        return withTestCoverageEvidence({
           result: {
             status: 'concluded',
             summary: '结构化诊断结果已产生。',
@@ -2786,7 +2857,7 @@ test('agent falls back to local reviewed formatting when presentation model retu
             startedAt: new Date().toISOString(),
             finishedAt: new Date().toISOString(),
           },
-        };
+        }, request);
       },
     };
 
@@ -2795,8 +2866,8 @@ test('agent falls back to local reviewed formatting when presentation model retu
       message: '请在当前项目里查找部门创建支持多少级，需要引用文件证据。',
     });
 
-    assert.equal(response.decision, 'partial');
-    assert.match(response.assistantMessage, /\*\*初步判断：/);
+    assert.equal(response.decision, 'final');
+    assert.match(response.assistantMessage, /\*\*结论：/);
     assert.match(response.assistantMessage, /部门创建入口按 15 级限制展示。/);
     assert.doesNotMatch(response.assistantMessage, /org-manage\/index\.html\.twig:82/);
     assert.match(response.caseSession.runs[0].result.evidence[0].source, /org-manage\/index\.html\.twig:82/);
@@ -3224,13 +3295,9 @@ test('model preflight cannot block an inspectable workspace question with generi
         }),
       );
     }
-
-    return chatResponse(
-      JSON.stringify({
-        claimIds: ['claim_1'],
-        evidenceIds: ['ev_01'],
-      }),
-    );
+    const reviewResponse = reviewStageResponse(init);
+    if (reviewResponse) return reviewResponse;
+    return presentationPlanResponse(init);
   };
 
   try {
@@ -3238,7 +3305,7 @@ test('model preflight cannot block an inspectable workspace question with generi
     const worker = {
       async diagnose(request) {
         workerRequests.push(request);
-        return {
+        return withTestCoverageEvidence({
           result: {
             status: 'concluded',
             summary: '找到倍速播放相关入口和视频播放影响范围。',
@@ -3272,7 +3339,7 @@ test('model preflight cannot block an inspectable workspace question with generi
             startedAt: new Date().toISOString(),
             finishedAt: new Date().toISOString(),
           },
-        };
+        }, request);
       },
     };
 
@@ -3285,8 +3352,8 @@ test('model preflight cannot block an inspectable workspace question with generi
     assert.equal(workerRequests.length, 1);
     assert.match(workerRequests[0].userGoal, /倍速播放/);
     assert.equal(workerRequests[0].unknowns.length, 0);
-    assert.equal(response.decision, 'partial');
-    assert.match(response.assistantMessage, /\*\*初步判断：/);
+    assert.equal(response.decision, 'final');
+    assert.match(response.assistantMessage, /\*\*结论：/);
     assert.match(response.assistantMessage, /问题可以通过当前 workspace 先做只读排查/);
     assert.equal(
       response.caseSession.logs.some((item) => item.phase === 'model_preflight_overridden_by_local_dispatch'),
@@ -3309,25 +3376,12 @@ test('agent can run one follow-up Claude turn when evidence review asks to conti
     modelCalls.push(body.messages);
     assert.deepEqual(body.response_format, { type: 'json_object' });
 
-    if (modelCalls.length === 1) {
+    if (body.messages[0].content.includes('Return JSON only. Use this shape:')) {
       return chatResponse(JSON.stringify({ action: 'dispatch', reason: '信息足够', missingInfo: [] }));
     }
-
-    if (modelCalls.length === 2) {
-      return chatResponse(
-        JSON.stringify({
-          claimIds: ['claim_1'],
-          evidenceIds: ['ev_01'],
-        }),
-      );
-    }
-
-    return chatResponse(
-      JSON.stringify({
-        claimIds: ['claim_1'],
-        evidenceIds: ['ev_02'],
-      }),
-    );
+    const reviewResponse = reviewStageResponse(init);
+    if (reviewResponse) return reviewResponse;
+    return presentationPlanResponse(init);
   };
 
   try {
@@ -3336,7 +3390,7 @@ test('agent can run one follow-up Claude turn when evidence review asks to conti
       async diagnose(request) {
         workerRequests.push(request);
         if (workerRequests.length === 1) {
-          return {
+          return withTestCoverageEvidence({
             result: {
               status: 'partial',
               summary: '还需要继续查路由',
@@ -3370,10 +3424,10 @@ test('agent can run one follow-up Claude turn when evidence review asks to conti
               startedAt: new Date().toISOString(),
               finishedAt: new Date().toISOString(),
             },
-          };
+          }, request);
         }
 
-        return {
+        return withTestCoverageEvidence({
           result: {
             status: 'concluded',
             summary: '找到播放器倍速配置和路由。',
@@ -3407,7 +3461,7 @@ test('agent can run one follow-up Claude turn when evidence review asks to conti
             startedAt: new Date().toISOString(),
             finishedAt: new Date().toISOString(),
           },
-        };
+        }, request);
       },
     };
 
@@ -3419,9 +3473,9 @@ test('agent can run one follow-up Claude turn when evidence review asks to conti
     assert.equal(workerRequests.length, 2);
     assert.equal(workerRequests[1].runId, 'run_02');
     assert.equal(workerRequests[1].claudeSessionId, workerRequests[0].claudeSessionId);
-    assert.match(response.assistantMessage, /\*\*初步判断：/);
+    assert.match(response.assistantMessage, /\*\*结论：/);
     assert.match(response.assistantMessage, /倍速开关由播放器初始化配置控制/);
-    assert.equal(response.decision, 'partial');
+    assert.equal(response.decision, 'final');
   } finally {
     globalThis.fetch = originalFetch;
     rmSync(dir, { recursive: true, force: true });

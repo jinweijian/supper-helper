@@ -18,6 +18,8 @@ import {
   validateGenerationFiles,
   validateStoredKnowledgeGeneration,
 } from './generation-validation.js';
+import { recoverStaleKnowledgeGenerationLock } from './generation-recovery.js';
+export { recoverStaleKnowledgeGenerationLock } from './generation-recovery.js';
 
 export interface KnowledgeGenerationPointer {
   version: 1;
@@ -168,27 +170,6 @@ export function publishKnowledgeGeneration(input: {
   }
 }
 
-export function recoverStaleKnowledgeGenerationLock(workspaceRoot: string): boolean {
-  const lockPath = join(indexesDir(workspaceRoot), '.generation-publish.lock');
-  if (!existsSync(lockPath)) return false;
-  if (Date.now() - statSync(lockPath).mtimeMs <= 5 * 60_000) {
-    throw new Error('generation_lock_busy');
-  }
-  const ownerPath = join(lockPath, 'owner.json');
-  if (existsSync(ownerPath)) {
-    try {
-      const owner = JSON.parse(readFileSync(ownerPath, 'utf8')) as { pid?: unknown };
-      if (typeof owner.pid === 'number' && isProcessAlive(owner.pid)) {
-        throw new Error('generation_lock_owner_alive');
-      }
-    } catch (error) {
-      if (error instanceof Error && error.message === 'generation_lock_owner_alive') throw error;
-      throw new Error('generation_lock_owner_invalid');
-    }
-  }
-  rmSync(lockPath, { recursive: true, force: true });
-  return true;
-}
 
 export function rollbackKnowledgeGeneration(input: {
   workspaceRoot: string;
@@ -252,15 +233,6 @@ function acquireLock(lockPath: string, expectedActiveGenerationId?: string): voi
     if (!existsSync(lockPath)) throw new Error('generation_lock_failed');
     const ageMs = Date.now() - statSync(lockPath).mtimeMs;
     throw new Error(ageMs > 5 * 60_000 ? 'generation_lock_stale' : 'generation_lock_busy');
-  }
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
   }
 }
 

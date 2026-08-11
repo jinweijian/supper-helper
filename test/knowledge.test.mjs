@@ -14,6 +14,7 @@ import {
   buildDraftSlices,
   discoverSourceFiles,
   evaluateQualityGate,
+  extractSourceBlocks,
   generateKnowledgeRepairPlan,
   initKnowledgeWorkspace,
   intakeSourceDocument,
@@ -118,6 +119,35 @@ test('knowledge intake exposes per-file stages and reuses unchanged content', as
     assert.equal(first.reused, false);
     assert.equal(second.reused, true);
     assert.equal(first.sourceDocumentId, second.sourceDocumentId);
+  } finally {
+    cleanup(workspace);
+    cleanup(sourceDir);
+  }
+});
+
+test('DOCX extraction preserves table rows as provenance-bearing table blocks', () => {
+  const workspace = tempWorkspace();
+  const sourceDir = mkdtempSync(join(tmpdir(), 'super-helper-source-docx-table-'));
+  try {
+    const docxPath = join(sourceDir, 'table-guide.docx');
+    writeMinimalDocx(docxPath, [
+      { style: '2', text: '提醒规则' },
+      { runs: ['AI', '伴学', '助手'] },
+      { tableRows: [['时间', '行为'], ['晚上8点', '发送未完成任务提醒']] },
+    ]);
+
+    const result = extractSourceBlocks({
+      workspaceRoot: workspace,
+      sourceDocumentId: 'src_table_guide',
+      sourcePath: docxPath,
+    });
+
+    const table = result.blocks.find((block) => block.type === 'table');
+    assert.ok(table, 'DOCX table must be preserved as a table block');
+    assert.match(table.text, /时间 \\| 行为/);
+    assert.match(table.text, /晚上8点 \\| 发送未完成任务提醒/);
+    assert.equal(result.blocks.some((block) => block.text === 'AI伴学助手'), true);
+    assert.equal(result.report.warnings.some((warning) => warning.startsWith('table_lost:')), false);
   } finally {
     cleanup(workspace);
     cleanup(sourceDir);
@@ -736,8 +766,15 @@ function writeMinimalDocx(path, paragraphs) {
     'utf8',
   );
   const body = paragraphs.map((paragraph) => {
+    if (paragraph.tableRows) {
+      const rows = paragraph.tableRows.map((cells) => (
+        `<w:tr>${cells.map((cell) => `<w:tc><w:p><w:r><w:t>${escapeXml(cell)}</w:t></w:r></w:p></w:tc>`).join('')}</w:tr>`
+      )).join('');
+      return `<w:tbl>${rows}</w:tbl>`;
+    }
     const style = paragraph.style ? `<w:pPr><w:pStyle w:val="${paragraph.style}"/></w:pPr>` : '';
-    return `<w:p>${style}<w:r><w:t>${escapeXml(paragraph.text)}</w:t></w:r></w:p>`;
+    const runs = paragraph.runs ?? [paragraph.text];
+    return `<w:p>${style}${runs.map((text) => `<w:r><w:t>${escapeXml(text)}</w:t></w:r>`).join('')}</w:p>`;
   }).join('');
   writeFileSync(
     join(wordDir, 'document.xml'),
@@ -1168,6 +1205,80 @@ test('draft slicer splits oversized heading group into multiple draft files', as
     for (const draftPath of result.draftPaths) {
       assert.doesNotMatch(readFileSync(draftPath, 'utf8'), /slice-size:exceeded/);
     }
+  } finally {
+    cleanup(workspace);
+  }
+});
+
+test('draft slicer removes stale files after a source is sliced again', () => {
+  const workspace = tempWorkspace();
+  try {
+    initKnowledgeWorkspace({ workspaceRoot: workspace });
+    const input = {
+      workspaceRoot: workspace,
+      sourceDocumentId: 'src_reslice',
+      sourceTitle: '重新切片测试',
+      sourceKind: 'whitepaper_docx',
+      sourceDocumentPath: 'knowledge/_sources/whitepapers/reslice.docx',
+    };
+    const first = buildDraftSlices({
+      ...input,
+      normalizedBlocks: [
+        normalizedBlock('src_reslice', 1, 'heading', '第一节'),
+        normalizedBlock('src_reslice', 2, 'paragraph', '第一段内容。'.repeat(20)),
+        normalizedBlock('src_reslice', 3, 'paragraph', '第二段内容。'.repeat(20)),
+      ],
+      maxParentChars: 120,
+    });
+    assert.equal(first.draftPaths.length > 1, true);
+    const stalePath = first.draftPaths.at(-1);
+
+    const second = buildDraftSlices({
+      ...input,
+      normalizedBlocks: [
+        normalizedBlock('src_reslice', 1, 'heading', '第一节'),
+        normalizedBlock('src_reslice', 2, 'paragraph', '更新后的唯一内容。'),
+      ],
+    });
+
+    assert.equal(second.draftPaths.length, 1);
+    assert.equal(existsSync(stalePath), false);
+  } finally {
+    cleanup(workspace);
+  }
+});
+
+test('knowledge CLI materializes file SecretRefs before rebuild', async () => {
+  const workspace = tempWorkspace();
+  try {
+    const config = defaultConfig();
+    config.storage.rootDir = workspace;
+    config.embedding.apiKeyRef = { source: 'file', key: 'providers.embedding' };
+    writeFileSync(join(workspace, 'secrets.json'), `${JSON.stringify({
+      version: 1,
+      values: { 'providers.embedding': 'knowledge-secret-value' },
+    }, null, 2)}\n`);
+    const { materializeKnowledgeCommandConfig } = await import('../dist/cli/knowledge/context.js');
+    const { createKnowledgeRebuildEmbedding } = await import('../dist/cli/knowledge/command-workspace.js');
+
+    const loaded = materializeKnowledgeCommandConfig(config);
+    loaded.embedding.enabled = true;
+    let receivedConfig;
+    const embedding = createKnowledgeRebuildEmbedding(loaded, (providerConfig) => {
+      receivedConfig = providerConfig;
+      return { embedDocuments: async () => [] };
+    });
+
+    assert.equal(loaded.embedding.apiKey, 'knowledge-secret-value');
+    assert.equal(receivedConfig.apiKey, 'knowledge-secret-value');
+    assert.equal(embedding.enabled, true);
+    assert.equal(embedding.config, loaded.embedding);
+    delete loaded.embedding.apiKey;
+    delete loaded.embedding.apiKeyRef;
+    loaded.embedding.apiKeyEnv = 'SUPER_HELPER_TEST_MISSING_EMBEDDING_KEY';
+    assert.equal(createKnowledgeRebuildEmbedding(loaded, () => {
+      throw new Error('provider factory must not run without execution credentials');
+    }), undefined);
   } finally {
     cleanup(workspace);
   }

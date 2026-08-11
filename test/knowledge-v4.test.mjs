@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -21,9 +21,14 @@ import {
   rollbackKnowledgeGeneration,
 } from '../dist/knowledge/generation-store.js';
 import { selectAnswerSpan } from '../dist/retrieval/answer-span.js';
-import { rebuildKnowledgeArtifacts } from '../dist/application/knowledge-rebuild-service.js';
+import {
+  rebuildKnowledgeArtifacts,
+  rebuildKnowledgeArtifactsWithQuality,
+} from '../dist/application/knowledge-rebuild-service.js';
 import { initKnowledgeWorkspace, updateKnowledgeIndex } from '../dist/knowledge/index.js';
 import { chunksPath, vectorsPath } from '../dist/knowledge/paths.js';
+import { defaultConfig } from '../dist/config.js';
+import { KnowledgeExperienceEvidenceResolver } from '../dist/runtime/knowledge-experience-resolver.js';
 
 function document(body, headings = ['配置说明']) {
   return {
@@ -53,6 +58,122 @@ function generationChunk(id, body = `Body ${id}.`) {
     chunk_id: id,
   };
 }
+
+function experienceResolverInput(workspaceRoot, chunkId, answerGoal) {
+  const config = defaultConfig();
+  config.knowledge.rootDir = workspaceRoot;
+  config.knowledge.isolateByWorkspace = false;
+  config.workspaces = [{ ...config.workspaces[0], id: 'current', rootPath: workspaceRoot }];
+  return {
+    resolver: new KnowledgeExperienceEvidenceResolver(config),
+    input: {
+      evidence: {
+        id: `ev_kb_${chunkId.replace(/^chk_/, '')}`,
+        kind: 'knowledge',
+        source: 'historical',
+        summary: 'historical summary',
+        confidence: 'high',
+      },
+      sourceRun: { request: { answerGoal } },
+      currentCase: { workspaceId: 'current' },
+    },
+  };
+}
+
+function writeExperienceKnowledge(workspaceRoot, lastVerifiedAt, body) {
+  initKnowledgeWorkspace({ workspaceRoot });
+  const faqRoot = join(workspaceRoot, 'knowledge', 'faq');
+  mkdirSync(faqRoot, { recursive: true });
+  writeFileSync(join(faqRoot, 'experience.md'), `---
+id: kb_experience
+title: Experience evidence
+type: faq
+module: general
+intent: how_to
+source_type: faq
+confidence: high
+status: active
+visibility: internal
+product_versions: []
+related_terms: []
+related_repos: []
+last_verified_at: ${lastVerifiedAt}
+owner: test
+source_document: knowledge/_sources/manual/experience.md
+source_document_id: source_experience
+source_block_ids:
+  - block_experience
+quality_status: ok
+---
+
+# 开启 X
+
+${body}
+`, 'utf8');
+  updateKnowledgeIndex({ workspaceRoot });
+  return readKnowledgeChunks(workspaceRoot).chunks[0];
+}
+
+test('Gate B Experience resolver preserves parent freshness instead of manufacturing current time', () => {
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'experience-stale-knowledge-'));
+  try {
+    const chunk = writeExperienceKnowledge(
+      workspaceRoot,
+      '2020-01-01',
+      `在设置页开启 X。${'这是用于满足最小分块边界的无关背景。'.repeat(8)}`,
+    );
+    const answerGoal = {
+      resolvedQuestion: '如何开启 X？',
+      mustAnswerItems: ['开启 X'],
+    };
+    const { resolver, input } = experienceResolverInput(workspaceRoot, chunk.chunk_id, answerGoal);
+    assert.equal(resolver.resolve(input), undefined);
+  } finally {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('Gate B Experience resolver rejects future verification timestamps', () => {
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'experience-future-knowledge-'));
+  try {
+    const chunk = writeExperienceKnowledge(
+      workspaceRoot,
+      '2099-01-01',
+      `在设置页开启 X。${'这是用于满足最小分块边界的无关背景。'.repeat(8)}`,
+    );
+    const answerGoal = {
+      resolvedQuestion: '如何开启 X？',
+      mustAnswerItems: ['开启 X'],
+    };
+    const { resolver, input } = experienceResolverInput(workspaceRoot, chunk.chunk_id, answerGoal);
+    assert.equal(resolver.resolve(input), undefined);
+  } finally {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('Gate B Experience resolver supplies a canonical bounded answer span, not the complete chunk body', () => {
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'experience-answer-span-'));
+  try {
+    const chunk = writeExperienceKnowledge(
+      workspaceRoot,
+      '2026-08-01',
+      `在设置页开启 X。此设置五分钟后生效。${'这里还有与问题无关但不应进入 coverage payload 的长段落。'.repeat(5)}`,
+    );
+    const answerGoal = {
+      resolvedQuestion: '如何开启 X？',
+      mustAnswerItems: ['开启 X'],
+    };
+    const { resolver, input } = experienceResolverInput(workspaceRoot, chunk.chunk_id, answerGoal);
+    const resolved = resolver.resolve(input);
+    assert.equal(resolved.evidence.validation.lastVerifiedAt, '2026-08-01');
+    assert.equal(resolved.coverageEvidenceEnvelope.safeText, '在设置页开启 X。');
+    assert.equal(resolved.evidence.summary, '在设置页开启 X。');
+    assert.doesNotMatch(resolved.coverageEvidenceEnvelope.safeText, /无关但不应进入/);
+  } finally {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
 
 test('Gate C v4 separates canonical body from retrieval text and hashes both semantics', () => {
   const [chunk] = buildKnowledgeChunks([document('## 开启方式\n在设置页开启 X。')]);
@@ -321,7 +442,36 @@ test('Gate C ignores incomplete generations and requires explicit stale-lock rec
       },
       mode: 'bm25_only',
     }), /generation_lock_stale/);
+    assert.throws(
+      () => recoverStaleKnowledgeGenerationLock(workspaceRoot),
+      /generation_recovery_active_invalid/,
+    );
+    assert.equal(existsSync(lock), true);
+
+    rmSync(join(indexes, 'active.json'));
+    writeFileSync(join(lock, 'owner.json'), JSON.stringify({
+      version: 1,
+      pid: -1,
+      created_at: stale.toISOString(),
+      expected_active_generation_id: null,
+    }));
+    utimesSync(lock, stale, stale);
+    assert.throws(
+      () => recoverStaleKnowledgeGenerationLock(workspaceRoot),
+      /generation_lock_owner_invalid/,
+    );
+    assert.equal(existsSync(lock), true);
+
+    writeFileSync(join(lock, 'owner.json'), JSON.stringify({
+      version: 1,
+      pid: 99_999_999,
+      created_at: stale.toISOString(),
+      expected_active_generation_id: null,
+    }));
+    utimesSync(lock, stale, stale);
     assert.equal(recoverStaleKnowledgeGenerationLock(workspaceRoot), true);
+    assert.equal(existsSync(lock), false);
+    assert.equal(existsSync(join(indexes, 'generations', 'gen_incomplete')), false);
   } finally {
     rmSync(workspaceRoot, { recursive: true, force: true });
   }
@@ -592,6 +742,68 @@ ${body}
     assert.equal(readActiveKnowledgeGeneration(workspaceRoot)?.generation_id, activeBefore);
   } finally {
     rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('Gate C strict quality audits the prepared candidate before active generation publication', async () => {
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'knowledge-quality-before-publish-'));
+  try {
+    initKnowledgeWorkspace({ workspaceRoot });
+    const faqRoot = join(workspaceRoot, 'knowledge', 'faq');
+    mkdirSync(faqRoot, { recursive: true });
+    writeFileSync(join(faqRoot, 'bad.md'), `---
+id: kb_bad_quality
+title: Bad quality candidate
+type: faq
+module: general
+intent: how_to
+source_type: faq
+confidence: high
+status: active
+visibility: internal
+product_versions: []
+related_terms: []
+related_repos: []
+last_verified_at: 2026-08-01
+owner: test
+quality_status: ok
+---
+
+# Bad candidate
+
+This document deliberately lacks required source provenance but has enough body text to build a v4 chunk. ${'body '.repeat(30)}
+`, 'utf8');
+    updateKnowledgeIndex({ workspaceRoot });
+    const activeBefore = readActiveKnowledgeGeneration(workspaceRoot)?.generation_id;
+
+    const rebuilt = await rebuildKnowledgeArtifactsWithQuality({
+      workspaceRoot,
+      qualityGate: 'strict',
+    });
+
+    assert.equal(rebuilt.published, false);
+    assert.equal(rebuilt.generation, undefined);
+    assert.equal(rebuilt.index.qualityGateResult.passed, false);
+    assert.equal(readActiveKnowledgeGeneration(workspaceRoot)?.generation_id, activeBefore);
+  } finally {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('Gate C synchronous index publishers capture expected active before preparing a candidate', () => {
+  const source = readFileSync(
+    new URL('../src/knowledge/indexes/build.ts', import.meta.url),
+    'utf8',
+  );
+  const updateStart = source.indexOf('export function updateKnowledgeIndex(');
+  const qualityStart = source.indexOf('export function updateKnowledgeIndexWithQuality(');
+  const ordinaryBody = source.slice(updateStart, qualityStart);
+  const qualityBody = source.slice(qualityStart, source.indexOf('function buildKeywordIndex'));
+
+  for (const body of [ordinaryBody, qualityBody]) {
+    assert.ok(body.indexOf('readActiveKnowledgeGeneration') >= 0);
+    assert.ok(body.indexOf('readActiveKnowledgeGeneration') < body.indexOf('prepareKnowledgeIndexGeneration'));
+    assert.match(body, /publishPreparedIndexGeneration\([^)]*expectedActiveGenerationId/);
   }
 });
 

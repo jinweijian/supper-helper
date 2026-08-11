@@ -24,7 +24,8 @@ import {
 } from '../knowledge/quality.js';
 
 export interface KnowledgeRebuildResult {
-  generation: KnowledgeGenerationPointer;
+  generation?: KnowledgeGenerationPointer;
+  published: boolean;
   index: PreparedKnowledgeIndexGeneration['result'];
   vector?: BuildKnowledgeVectorIndexResult;
 }
@@ -47,6 +48,15 @@ export async function rebuildKnowledgeArtifacts(input: {
     chunking: input.chunking,
   });
 
+  return publishPreparedKnowledgeArtifacts(input, index, publisher, expectedActiveGenerationId);
+}
+
+async function publishPreparedKnowledgeArtifacts(
+  input: Parameters<typeof rebuildKnowledgeArtifacts>[0],
+  index: PreparedKnowledgeIndexGeneration,
+  publisher: KnowledgeGenerationPublisherPort,
+  expectedActiveGenerationId: string | undefined,
+): Promise<KnowledgeRebuildResult> {
   if (input.embedding?.enabled) {
     const vector = await prepareKnowledgeVectorGeneration({
       workspaceRoot: input.workspaceRoot,
@@ -68,6 +78,7 @@ export async function rebuildKnowledgeArtifacts(input: {
     });
     return {
       generation,
+      published: true,
       index: finalizeKnowledgeIndexGeneration(input.workspaceRoot, index.result),
       vector: vector.result,
     };
@@ -80,6 +91,7 @@ export async function rebuildKnowledgeArtifacts(input: {
   });
   return {
     generation,
+    published: true,
     index: finalizeKnowledgeIndexGeneration(input.workspaceRoot, index.result),
   };
 }
@@ -88,30 +100,47 @@ export async function rebuildKnowledgeArtifactsWithQuality(input: {
   workspaceRoot: string;
   chunking?: KnowledgeChunkingOptions;
   qualityGate?: KnowledgeQualityGate;
+  embedding?: {
+    enabled: boolean;
+    provider: EmbeddingDocumentPort;
+    config: EmbeddingArtifactConfig;
+  };
 }): Promise<KnowledgeRebuildResult> {
-  const rebuilt = await rebuildKnowledgeArtifacts(input);
   const gate = input.qualityGate ?? 'warn';
+  const publisher = createFileKnowledgeGenerationPublisher(input.workspaceRoot);
+  const expectedActiveGenerationId = publisher.readActive()?.generation_id;
+  const prepared = prepareKnowledgeIndexGeneration({
+    workspaceRoot: input.workspaceRoot,
+    chunking: input.chunking,
+  });
   if (gate === 'off') {
-    rebuilt.index.qualityGateResult = {
+    prepared.result.qualityGateResult = {
       passed: true,
       exitCode: 0,
       reason: 'quality gate disabled',
     };
-    return rebuilt;
+    return publishPreparedKnowledgeArtifacts(input, prepared, publisher, expectedActiveGenerationId);
   }
-  const report = auditKnowledgeQuality({ workspaceRoot: input.workspaceRoot, gate });
-  rebuilt.index.qualityReportPath = writeKnowledgeQualityReport({
+  const report = auditKnowledgeQuality({
+    workspaceRoot: input.workspaceRoot,
+    gate,
+    chunks: prepared.chunks,
+  });
+  prepared.result.qualityReportPath = writeKnowledgeQualityReport({
     workspaceRoot: input.workspaceRoot,
     report,
   });
-  rebuilt.index.sourceQualityReportPath = writeSourceQualityReport({
+  prepared.result.sourceQualityReportPath = writeSourceQualityReport({
     workspaceRoot: input.workspaceRoot,
     report,
   });
-  rebuilt.index.qualityGateResult = evaluateQualityGate(report, gate);
-  rebuilt.index.qualitySeverityCounts = report.severityCounts;
-  rebuilt.index.qualityIssueCounts = report.issueCounts;
-  return rebuilt;
+  prepared.result.qualityGateResult = evaluateQualityGate(report, gate);
+  prepared.result.qualitySeverityCounts = report.severityCounts;
+  prepared.result.qualityIssueCounts = report.issueCounts;
+  if (!prepared.result.qualityGateResult.passed) {
+    return { published: false, index: prepared.result };
+  }
+  return publishPreparedKnowledgeArtifacts(input, prepared, publisher, expectedActiveGenerationId);
 }
 
 export async function rebuildKnowledgeArtifactsWithRetry(

@@ -11,7 +11,7 @@ import type {
   KnowledgeSourceBlockType,
 } from './types.js';
 
-const DOCX_PARSER = 'local-docx-v1';
+const DOCX_PARSER = 'local-docx-v2';
 const MARKDOWN_PARSER = 'local-markdown-v1';
 const UNKNOWN_RATIO_THRESHOLD = 0.3;
 
@@ -21,6 +21,7 @@ interface ParsedDocxBlock {
   styleName?: string;
   isListItem: boolean;
   raw: string;
+  explicitType?: KnowledgeSourceBlockType;
 }
 
 export function extractSourceBlocks(input: {
@@ -43,7 +44,13 @@ export function extractSourceBlocks(input: {
   }
 
   const blocks = raw.map((item, index) => buildSourceBlock(item, index, input.sourceDocumentId));
-  const report = buildExtractReport(input.sourceDocumentId, blocks, parser, ext, ext === '.docx' && hasDocxTables(input.sourcePath));
+  const report = buildExtractReport(
+    input.sourceDocumentId,
+    blocks,
+    parser,
+    ext,
+    ext === '.docx' && hasDocxTables(input.sourcePath),
+  );
   writeExtractArtifacts(input.workspaceRoot, blocks, report);
   return { blocks, report };
 }
@@ -65,6 +72,9 @@ function buildSourceBlock(item: ParsedDocxBlock, index: number, sourceDocumentId
 }
 
 function inferBlockType(item: ParsedDocxBlock): KnowledgeSourceBlockType {
+  if (item.explicitType) {
+    return item.explicitType;
+  }
   if (item.headingLevel) {
     return 'heading';
   }
@@ -103,7 +113,7 @@ function buildExtractReport(
   if (blocks.length > 0 && unknownBlockCount / blocks.length > UNKNOWN_RATIO_THRESHOLD) {
     warnings.push(`Unknown block ratio (${unknownBlockCount}/${blocks.length}) exceeds ${UNKNOWN_RATIO_THRESHOLD}.`);
   }
-  if (ext === '.docx' && hasTables) {
+  if (ext === '.docx' && hasTables && !blocks.some((block) => block.type === 'table')) {
     warnings.push('table_lost: DOCX table structure not preserved in this extractor; table cells appear as paragraphs.');
   }
   return {
@@ -144,23 +154,62 @@ function parseDocx(path: string): ParsedDocxBlock[] {
   const documentXml = unzipText(path, 'word/document.xml');
   const styleMap = parseDocxStyles(path);
   const blocks: ParsedDocxBlock[] = [];
-  for (const match of documentXml.matchAll(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g)) {
+  for (const match of documentXml.matchAll(/<w:(p|tbl)(?:\s[^>]*)?>[\s\S]*?<\/w:\1>/g)) {
     const block = match[0];
-    const text = Array.from(block.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g))
-      .map((m) => decodeXml(m[1] ?? ''))
-      .join('')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (!text) {
+    if (match[1] === 'tbl') {
+      const text = parseDocxTableText(block);
+      if (text) {
+        blocks.push({
+          text,
+          isListItem: false,
+          raw: block,
+          explicitType: 'table',
+        });
+      }
       continue;
     }
-    const styleId = block.match(/<w:pStyle\s+w:val="([^"]+)"/)?.[1];
-    const styleName = styleId ? styleMap.get(styleId) : undefined;
-    const headingLevel = resolveHeadingLevel(styleId, styleName);
-    const isListItem = !headingLevel && (styleName?.includes('list') || /^\s*[\d、〇•\-\*]/.test(text));
-    blocks.push({ text, headingLevel, styleName, isListItem, raw: block });
+    const paragraph = parseDocxParagraph(block, styleMap);
+    if (paragraph) {
+      blocks.push(paragraph);
+    }
   }
   return blocks;
+}
+
+function parseDocxParagraph(
+  block: string,
+  styleMap: Map<string, string>,
+): ParsedDocxBlock | undefined {
+  const text = extractDocxText(block);
+  if (!text) {
+    return undefined;
+  }
+  const styleId = block.match(/<w:pStyle\s+w:val="([^"]+)"/)?.[1];
+  const styleName = styleId ? styleMap.get(styleId) : undefined;
+  const headingLevel = resolveHeadingLevel(styleId, styleName);
+  const isListItem = !headingLevel && (styleName?.includes('list') || /^\s*[\d、〇•\-\*]/.test(text));
+  return { text, headingLevel, styleName, isListItem, raw: block };
+}
+
+function parseDocxTableText(tableXml: string): string {
+  const rows: string[] = [];
+  for (const rowMatch of tableXml.matchAll(/<w:tr(?:\s[^>]*)?>[\s\S]*?<\/w:tr>/g)) {
+    const cells = Array.from(rowMatch[0].matchAll(/<w:tc(?:\s[^>]*)?>[\s\S]*?<\/w:tc>/g))
+      .map((cellMatch) => extractDocxText(cellMatch[0]))
+      .filter(Boolean);
+    if (cells.length > 0) {
+      rows.push(cells.join(' | '));
+    }
+  }
+  return rows.join('\n');
+}
+
+function extractDocxText(xml: string): string {
+  return Array.from(xml.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g))
+    .map((match) => decodeXml(match[1] ?? ''))
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function parseDocxStyles(path: string): Map<string, string> {

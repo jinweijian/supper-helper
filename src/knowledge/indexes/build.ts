@@ -83,15 +83,24 @@ export function updateKnowledgeIndex(input: {
   workspaceRoot: string;
   chunking?: KnowledgeChunkingOptions;
 }): KnowledgeUpdateResult {
+  const expectedActiveGenerationId = readActiveKnowledgeGeneration(input.workspaceRoot)?.generation_id;
   const prepared = prepareKnowledgeIndexGeneration(input);
+  return publishPreparedIndexGeneration(input.workspaceRoot, prepared, expectedActiveGenerationId);
+}
+
+function publishPreparedIndexGeneration(
+  workspaceRoot: string,
+  prepared: PreparedKnowledgeIndexGeneration,
+  expectedActiveGenerationId: string | undefined,
+): KnowledgeUpdateResult {
   mkdirSync(join(prepared.result.knowledgeRoot, 'indexes'), { recursive: true });
   publishKnowledgeGeneration({
-    workspaceRoot: input.workspaceRoot,
-    expectedActiveGenerationId: readActiveKnowledgeGeneration(input.workspaceRoot)?.generation_id,
+    workspaceRoot,
+    expectedActiveGenerationId,
     mode: 'bm25_only',
     files: prepared.files,
   });
-  return finalizeKnowledgeIndexGeneration(input.workspaceRoot, prepared.result);
+  return finalizeKnowledgeIndexGeneration(workspaceRoot, prepared.result);
 }
 
 export function finalizeKnowledgeIndexGeneration(
@@ -114,21 +123,31 @@ export function updateKnowledgeIndexWithQuality(input: {
   chunking?: KnowledgeChunkingOptions;
 }): KnowledgeUpdateResult {
   const gate = input.qualityGate ?? 'warn';
-  const result = updateKnowledgeIndex({ workspaceRoot: input.workspaceRoot, chunking: input.chunking });
+  const expectedActiveGenerationId = readActiveKnowledgeGeneration(input.workspaceRoot)?.generation_id;
+  const prepared = prepareKnowledgeIndexGeneration(input);
   if (gate === 'off') {
+    const result = publishPreparedIndexGeneration(input.workspaceRoot, prepared, expectedActiveGenerationId);
     return {
       ...result,
       qualityGateResult: { passed: true, exitCode: 0, reason: 'quality gate disabled' },
     };
   }
-  const report = auditKnowledgeQuality({ workspaceRoot: input.workspaceRoot, gate });
+  const report = auditKnowledgeQuality({
+    workspaceRoot: input.workspaceRoot,
+    gate,
+    chunks: prepared.chunks,
+  });
   const qualityReportPath = writeKnowledgeQualityReport({ workspaceRoot: input.workspaceRoot, report });
   const sourceQualityReportPath = writeSourceQualityReport({ workspaceRoot: input.workspaceRoot, report });
+  const qualityGateResult = evaluateQualityGate(report, gate);
+  const result = qualityGateResult.passed
+    ? publishPreparedIndexGeneration(input.workspaceRoot, prepared, expectedActiveGenerationId)
+    : prepared.result;
   return {
     ...result,
     qualityReportPath,
     sourceQualityReportPath,
-    qualityGateResult: evaluateQualityGate(report, gate),
+    qualityGateResult,
     qualitySeverityCounts: report.severityCounts,
     qualityIssueCounts: report.issueCounts,
   };

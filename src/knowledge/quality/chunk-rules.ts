@@ -1,18 +1,21 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import type { KnowledgeDocument, KnowledgeQualityIssue } from '../types.js';
+import { chunksPath } from '../paths.js';
+import type { KnowledgeChunk, KnowledgeDocument, KnowledgeQualityIssue } from '../types.js';
 
 export function auditKnowledgeChunks(
   documents: KnowledgeDocument[],
   workspaceRoot: string,
   issues: KnowledgeQualityIssue[],
+  candidateChunks?: KnowledgeChunk[],
 ): number {
-  const path = join(workspaceRoot, 'knowledge', 'indexes', 'chunks.jsonl');
-  if (!existsSync(path)) return 0;
+  const path = chunksPath(workspaceRoot);
+  if (!candidateChunks && !existsSync(path)) return 0;
   const knownIds = new Set(documents.map((document) => document.frontmatter.id));
   const parentsWithChunks = new Set<string>();
   let count = 0;
-  for (const line of readFileSync(path, 'utf8').split(/\r?\n/).filter(Boolean)) {
+  const serializedChunks = candidateChunks?.map((chunk) => JSON.stringify(chunk)) ??
+    readFileSync(path, 'utf8').split(/\r?\n/).filter(Boolean);
+  for (const line of serializedChunks) {
     try {
       const chunk = JSON.parse(line) as {
         chunk_id: string;

@@ -1,5 +1,6 @@
 import type { UserPersona } from '../domain.js';
-import { redactSecretText } from '../redaction.js';
+import { redactInternalPaths, redactSecretText } from '../redaction.js';
+import { redactCompatibilitySentinels } from './safe-answer-redaction.js';
 import type {
   SafeAnswerSegment,
   SafeFrozenAnswerProjection,
@@ -14,9 +15,9 @@ export function renderSafeFrozenAnswer(input: {
 }): string {
   const projection = input.projection;
   const order = validateSafePresentationPlan(input.plan, projection).order;
-  const primary = orderedSegments(projection.primary, order);
-  const actions = orderedSegments(projection.actions, order);
-  const supporting = projection.supporting;
+  const primary = projection.primary;
+  const actions = projection.actions;
+  const supporting = orderedSegments(projection.supporting, order);
   const lines: string[] = [
     `**针对你的问题：** ${projection.answerTarget}`,
     '',
@@ -68,7 +69,7 @@ export function validateSafePresentationPlan(
   }
   const requiredDirect = projection.primary.map((item) => item.id);
   const requiredActions = projection.actions.map((item) => item.id);
-  if (!sameSet(directIds, requiredDirect) || !sameSet(actionIds, requiredActions)) {
+  if (!sameOrder(directIds, requiredDirect) || !sameOrder(actionIds, requiredActions)) {
     return { accepted: false, reason: 'presentation_required_set_mismatch' };
   }
   if ([...requiredDirect, ...requiredActions].some((id) => !claimIds.includes(id))) {
@@ -97,15 +98,9 @@ function orderedSegments(items: SafeAnswerSegment[], order: string[] | undefined
 }
 
 function wholeReplySafetyScan(value: string): string {
-  return redactInternalPaths(redactSecretText(value))
-    .replace(/\b(?:stdout|stderr|provider[_ -]?payload|worker[_ -]?trace)\s*[:=][^\n]*/gi, '[内部诊断信息已隐藏]');
-}
-
-function redactInternalPaths(value: string): string {
-  return value
-    .replace(/knowledge\/(?:_sources|faq|whitepapers)\/[^\s，。；)）\]]+/gi, '内部资料')
-    .replace(/\/(?:Users|home)\/[^\s，。；)）\]]+/g, '内部路径')
-    .replace(/[A-Za-z]:\\[^\s，。；)）\]]+/g, '内部路径');
+  return redactCompatibilitySentinels(redactInternalPaths(redactSecretText(value)))
+    .replace(/\b(?:stdout|stderr|provider[_ -]?payload|worker[_ -]?trace)\s*[:=][^\n]*/gi, '[内部诊断信息已隐藏]')
+    .replace(/\b(?:worker[_ -]?trace|provider[_ -]?payload)\b/gi, '内部诊断信息');
 }
 
 function formatClaimType(segment: SafeAnswerSegment): string {
@@ -122,6 +117,6 @@ function uniqueStrings(value: unknown): string[] | undefined {
   return Array.from(new Set(value));
 }
 
-function sameSet(left: string[], right: string[]): boolean {
-  return left.length === right.length && left.every((item) => right.includes(item));
+function sameOrder(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((item, index) => item === right[index]);
 }

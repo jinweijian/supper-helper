@@ -45,8 +45,10 @@ Evidence Coverage Agent 对所有答案来源执行独立覆盖审核。producer
 ## Rules
 
 - 只能接受 evidence 实际支持的 binding；不能照抄 producer 的 candidate `answers`。
+- `primary_answer`、`next_action`、`supporting_context` 都必须逐 claim 审核与当前 item 的相关 binding；非 primary binding 只控制可见 relevance，不能进入 `fullQuestionClaimIds` 或授予主答覆盖。
+- 每个 accepted binding 必须包含至少一个该 claim 直接绑定的当前 evidence ID，且 item 必须来自该 claim 的 candidate item IDs。
 - `fullQuestion=full` 必须覆盖完整 `resolvedQuestion`，`missingElements` 为空，且
-  `fullQuestionClaimIds` 列出共同构成完整答案、必须可见的 primary claims。
+  `fullQuestionClaimIds` 非空并列出共同构成完整答案、必须可见且已有 accepted binding 的 primary claims。
 - 多条 primary claims 可以通过 reviewer-accepted binding 并集覆盖全部 items；不得要求单 claim 全覆盖。
 - sentinel `direct_answer` 只是兼容 item ID，仍须审核完整 `resolvedQuestion`。
 - 只根据输入 safe segments 判断，不使用业务领域关键词表、fixture 特判或隐藏知识。

@@ -338,11 +338,56 @@ function createModelAgent(dir, worker, modelPayload) {
     temperature: 0,
   };
   const store = new FileMemoryStore(dir);
-  const agent = new DiagnosticRuntime(config, store, worker);
+  const adapterBackedWorker = {
+    async diagnose(request) {
+      const response = await worker.diagnose(request);
+      if (response.coverageEvidence) return response;
+      return {
+        ...response,
+        coverageEvidence: response.result.evidence
+          .filter((item) => item.kind === 'workspace' && item.confidence !== 'low')
+          .map((item) => ({
+            evidenceId: item.id,
+            kind: 'workspace',
+            safeText: `测试只读适配器已重验 ${item.id}`,
+            runId: request.runId,
+            validated: true,
+          })),
+      };
+    },
+  };
+  const agent = new DiagnosticRuntime(config, store, adapterBackedWorker);
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => modelChatResponse(
-    typeof modelPayload === 'string' ? modelPayload : JSON.stringify(modelPayload),
-  );
+  globalThis.fetch = async (_url, init) => {
+    const request = JSON.parse(init.body);
+    const system = request.messages[0]?.content ?? '';
+    const user = request.messages.find((message) => message.role === 'user')?.content ?? '{}';
+    if (system.includes('Evidence Coverage Agent')) {
+      const input = JSON.parse(user);
+      const bindings = input.claimSegments
+        .filter((claim) => claim.candidateAnswerItemIds.length > 0 && claim.evidenceIds.length > 0)
+        .map((claim) => ({
+          claimId: claim.id,
+          answerItemIds: claim.candidateAnswerItemIds,
+          evidenceIds: claim.evidenceIds,
+        }));
+      return modelChatResponse(JSON.stringify({
+        status: 'accepted',
+        bindings,
+        fullQuestion: 'full',
+        fullQuestionClaimIds: input.claimSegments
+          .filter((claim) => claim.role === 'primary_answer')
+          .map((claim) => claim.id),
+        missingElements: [],
+      }));
+    }
+    if (system.includes('Visible Prompt Safety Agent')) {
+      return modelChatResponse(JSON.stringify({ status: 'accepted', acceptedIds: [] }));
+    }
+    return modelChatResponse(
+      typeof modelPayload === 'string' ? modelPayload : JSON.stringify(modelPayload),
+    );
+  };
   return { agent, store, config, restore: () => { globalThis.fetch = originalFetch; } };
 }
 

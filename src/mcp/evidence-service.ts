@@ -131,7 +131,8 @@ export class McpEvidenceService {
       } catch {
         return [];
       }
-      if (!EvidenceEnvelopeSchema.safeParse(parsed.superHelperEvidence).success) return [];
+      const envelope = EvidenceEnvelopeSchema.safeParse(parsed.superHelperEvidence);
+      if (!envelope.success) return [];
       const targetEvidence = request.context?.mcp?.evidence.find((item) => item.id === call.evidenceId);
       if (targetEvidence?.confidence !== 'high') return [];
       const server = this.config.mcpTools.find((item) => item.id === call.serverId);
@@ -141,7 +142,7 @@ export class McpEvidenceService {
         request.allowedMcpToolIds.includes(call.serverId) &&
         server.allowedToolNames?.includes(call.toolName),
       );
-      const safeText = call.result.text
+      const safeText = envelope.data.claims.map((claim) => claim.text).join('；')
         .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
         .replace(/\s+/g, ' ')
         .trim();

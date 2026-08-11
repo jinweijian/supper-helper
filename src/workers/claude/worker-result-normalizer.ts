@@ -20,7 +20,9 @@ export function normalizeWorkerDiagnosticResult(
     const evidenceIds = Array.isArray(claim.evidenceIds)
       ? claim.evidenceIds.filter((id) => validEvidenceIds.has(id))
       : [];
-    const answers = claim.role === 'primary_answer' || claim.role === 'next_action'
+    const answers = claim.role === 'primary_answer' ||
+      claim.role === 'next_action' ||
+      claim.role === 'supporting_context'
       ? exactItems.filter((item) => Array.isArray(claim.answers) && claim.answers.includes(item))
       : [];
     if (claim.role === 'next_action') {

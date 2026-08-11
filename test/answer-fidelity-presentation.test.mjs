@@ -92,6 +92,7 @@ test('Gate A Presentation: valid model plan and fallback render the same require
     answerGoal: GOAL,
     frozenPrimaryClaimIds: ['primary'],
     acceptedClaimIds: ['primary', 'action_1', 'action_2'],
+    reviewedBindingClaimIds: ['primary', 'action_1', 'action_2'],
     visiblePromptReview: { status: 'accepted', acceptedIds: [] },
   });
 
@@ -110,6 +111,7 @@ test('Gate A Presentation: valid model plan and fallback render the same require
     assert.match(fallback, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.match(planned, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
+  assert.ok(planned.indexOf('保存后重新加载配置。') < planned.indexOf('五分钟后执行只读状态检查。'));
 });
 
 test('Gate A Presentation: malformed or incomplete model plan falls back to complete frozen content', async () => {
@@ -126,6 +128,7 @@ test('Gate A Presentation: malformed or incomplete model plan falls back to comp
     answerGoal: GOAL,
     frozenPrimaryClaimIds: ['primary'],
     acceptedClaimIds: ['primary', 'action'],
+    reviewedBindingClaimIds: ['primary', 'action'],
     visiblePromptReview: { status: 'accepted', acceptedIds: [] },
   });
   const malformedPlan = {
@@ -160,6 +163,7 @@ test('Gate A Presentation: unknown IDs, process notes, duplicates and unreferenc
     answerGoal: GOAL,
     frozenPrimaryClaimIds: ['primary'],
     acceptedClaimIds: ['primary', 'process'],
+    reviewedBindingClaimIds: ['primary'],
     visiblePromptReview: { status: 'accepted', acceptedIds: [] },
   });
   const reply = renderSafeFrozenAnswer({
@@ -183,6 +187,7 @@ test('Gate A Presentation: answer target is runtime-owned and ignores model text
     answerGoal: GOAL,
     frozenPrimaryClaimIds: ['primary'],
     acceptedClaimIds: ['primary'],
+    reviewedBindingClaimIds: ['primary'],
     visiblePromptReview: { status: 'accepted', acceptedIds: [] },
   });
   const reply = renderSafeFrozenAnswer({
@@ -214,6 +219,7 @@ test('Gate A Presentation: rejected summary, unused evidence and unreviewed opaq
     answerGoal: GOAL,
     frozenPrimaryClaimIds: ['primary'],
     acceptedClaimIds: ['primary', 'opaque'],
+    reviewedBindingClaimIds: ['primary'],
     visiblePromptReview: { status: 'unknown', acceptedIds: [] },
   });
   const reply = renderSafeFrozenAnswer({ projection, persona: 'developer' });
@@ -228,19 +234,122 @@ test('Gate A Presentation: safe technical names remain while secrets and interna
       claim(
         'primary',
         'primary_answer',
-        '将 search.provider 设置为 embedding；接口返回 ConfigValidationError。token=sk-live-secret 位于 /Users/alice/knowledge/_sources/a.md。',
+        '将 search.provider 设置为 embedding；接口返回 ConfigValidationError。检查 /Users/alice/app/config/search.yaml。workerTrace 与 providerPayload 仅供内部诊断。token=sk-live-secret 位于 /Users/alice/knowledge/_sources/a.md。',
       ),
     ]),
     answerGoal: GOAL,
     frozenPrimaryClaimIds: ['primary'],
     acceptedClaimIds: ['primary'],
+    reviewedBindingClaimIds: ['primary'],
     visiblePromptReview: { status: 'accepted', acceptedIds: [] },
   });
   for (const persona of ['operations', 'support', 'customer', 'developer']) {
     const reply = renderSafeFrozenAnswer({ projection, persona });
-    assert.match(reply, /search\.provider|embedding/);
-    assert.doesNotMatch(reply, /sk-live-secret|Users\/alice|knowledge\/_sources/);
+    assert.match(reply, /search\.provider|embedding|search\.yaml/);
+    assert.doesNotMatch(reply, /sk-live-secret|Users\/alice|knowledge\/_sources|workerTrace|providerPayload/i);
   }
+});
+
+test('Gate A Presentation: standalone provider-shaped secrets are removed by the whole-reply boundary', async () => {
+  const { buildSafeFrozenAnswerProjection, renderSafeFrozenAnswer } = await api();
+  const secret = 'sk-live-secret-1234567890';
+  const projection = buildSafeFrozenAnswerProjection({
+    result: result([claim('primary', 'primary_answer', `请使用 ${secret} 调试。`)]),
+    answerGoal: { ...GOAL, resolvedQuestion: `如何处理 ${secret}？` },
+    frozenPrimaryClaimIds: ['primary'],
+    acceptedClaimIds: ['primary'],
+    reviewedBindingClaimIds: ['primary'],
+    visiblePromptReview: { status: 'accepted', acceptedIds: [] },
+  });
+  const reply = renderSafeFrozenAnswer({ projection, persona: 'developer' });
+
+  assert.doesNotMatch(reply, new RegExp(secret));
+  assert.match(reply, /\[REDACTED\]/);
+});
+
+test('Gate A Presentation: trace labels cannot preserve their payload tails after redaction', async () => {
+  const { buildSafeFrozenAnswerProjection, renderSafeFrozenAnswer } = await api();
+  const projection = buildSafeFrozenAnswerProjection({
+    result: result([claim(
+      'primary',
+      'primary_answer',
+      'workerTrace: INTERNAL_STACK_PAYLOAD_X\nproviderPayload=RAW_BACKEND_RESPONSE_Y',
+    )]),
+    answerGoal: GOAL,
+    frozenPrimaryClaimIds: ['primary'],
+    acceptedClaimIds: ['primary'],
+    reviewedBindingClaimIds: ['primary'],
+    visiblePromptReview: { status: 'accepted', acceptedIds: [] },
+  });
+  const reply = renderSafeFrozenAnswer({ projection, persona: 'developer' });
+
+  assert.doesNotMatch(reply, /INTERNAL_STACK_PAYLOAD_X|RAW_BACKEND_RESPONSE_Y|workerTrace|providerPayload/i);
+  assert.equal(projection.primary.length, 0);
+  assert.equal(projection.outcome, 'partial');
+  assert.equal(projection.blockerCodes.includes('required_primary_materialization_failed'), true);
+});
+
+test('Gate A Presentation: preliminary, action and supporting claims require reviewer-accepted bindings', async () => {
+  const { buildSafeFrozenAnswerProjection, renderSafeFrozenAnswer } = await api();
+  const projection = buildSafeFrozenAnswerProjection({
+    result: result([
+      claim('relevant_primary', 'primary_answer', '与当前问题相关的初步判断。'),
+      claim('irrelevant_primary', 'primary_answer', 'UNREVIEWED_PRIMARY'),
+      claim('relevant_action', 'next_action', '执行相关的只读检查。'),
+      claim('irrelevant_action', 'next_action', 'UNREVIEWED_ACTION'),
+      claim('irrelevant_support', 'supporting_context', 'UNREVIEWED_SUPPORT'),
+    ], {
+      status: 'partial',
+      recommendedNextAction: 'continue_diagnosis',
+    }),
+    answerGoal: GOAL,
+    frozenPrimaryClaimIds: [],
+    acceptedClaimIds: [
+      'relevant_primary',
+      'irrelevant_primary',
+      'relevant_action',
+      'irrelevant_action',
+      'irrelevant_support',
+    ],
+    reviewedBindingClaimIds: ['relevant_primary', 'relevant_action'],
+    visiblePromptReview: { status: 'accepted', acceptedIds: [] },
+  });
+  const reply = renderSafeFrozenAnswer({ projection, persona: 'operations' });
+
+  assert.match(reply, /与当前问题相关的初步判断|执行相关的只读检查/);
+  assert.doesNotMatch(reply, /UNREVIEWED_PRIMARY|UNREVIEWED_ACTION|UNREVIEWED_SUPPORT/);
+});
+
+test('Gate A Presentation: compatibility sentinel never enters the visible reply', async () => {
+  const { buildSafeFrozenAnswerProjection, renderSafeFrozenAnswer } = await api();
+  const projection = buildSafeFrozenAnswerProjection({
+    result: result([
+      claim(
+        'primary',
+        'primary_answer',
+        String.raw`审核不可用时回退为 direct_answer；代码证据包含 \bdirect_answer\b、strict_direct_answer 与 \bDIRECT_ANSWER_ITEM\b。`,
+      ),
+    ]),
+    answerGoal: {
+      ...GOAL,
+      mustAnswerItems: ['direct_answer'],
+    },
+    frozenPrimaryClaimIds: ['primary'],
+    acceptedClaimIds: ['primary'],
+    reviewedBindingClaimIds: ['primary'],
+    visiblePromptReview: { status: 'accepted', acceptedIds: [] },
+  });
+  const reply = renderSafeFrozenAnswer({
+    projection: {
+      ...projection,
+      answerTarget: String.raw`检查 ${projection.answerTarget}、direct_answer、\bdirect_answer\b 与 DIRECT_ANSWER_ITEM`,
+    },
+    persona: 'developer',
+  });
+
+  assert.doesNotMatch(reply, /direct_answer/i);
+  assert.doesNotMatch(reply, /DIRECT_ANSWER_ITEM/i);
+  assert.doesNotMatch(reply, /兼容兜底项/);
 });
 
 test('Gate A Presentation: partial answer leads with preliminary judgement and labels supporting clues', async () => {
@@ -256,6 +365,7 @@ test('Gate A Presentation: partial answer leads with preliminary judgement and l
     answerGoal: GOAL,
     frozenPrimaryClaimIds: ['primary'],
     acceptedClaimIds: ['primary', 'support'],
+    reviewedBindingClaimIds: ['primary', 'support'],
     visiblePromptReview: { status: 'accepted', acceptedIds: [] },
   });
   const reply = renderSafeFrozenAnswer({ projection, persona: 'operations' });
@@ -274,6 +384,7 @@ test('Gate A Presentation: generic read-only guidance appears only when no froze
     answerGoal: GOAL,
     frozenPrimaryClaimIds: ['primary'],
     acceptedClaimIds: ['primary'],
+    reviewedBindingClaimIds: ['primary'],
     visiblePromptReview: { status: 'accepted', acceptedIds: [] },
   });
   assert.match(renderSafeFrozenAnswer({ projection: withoutAction, persona: 'support' }), /通用只读建议/);
@@ -289,6 +400,7 @@ test('Gate A Presentation: generic read-only guidance appears only when no froze
     answerGoal: GOAL,
     frozenPrimaryClaimIds: ['primary'],
     acceptedClaimIds: ['primary', 'action'],
+    reviewedBindingClaimIds: ['primary', 'action'],
     visiblePromptReview: { status: 'accepted', acceptedIds: [] },
   });
   const reply = renderSafeFrozenAnswer({ projection: withAction, persona: 'support' });
@@ -308,6 +420,7 @@ test('Gate A Presentation: required overflow downgrades while optional overflow 
     answerGoal: GOAL,
     frozenPrimaryClaimIds: ['primary'],
     acceptedClaimIds: ['primary', 'action'],
+    reviewedBindingClaimIds: ['primary', 'action'],
     visiblePromptReview: { status: 'accepted', acceptedIds: [] },
   });
   assert.equal(exact.primary[0].text, '甲'.repeat(1000));
@@ -318,6 +431,7 @@ test('Gate A Presentation: required overflow downgrades while optional overflow 
     answerGoal: GOAL,
     frozenPrimaryClaimIds: ['primary'],
     acceptedClaimIds: ['primary'],
+    reviewedBindingClaimIds: ['primary'],
     visiblePromptReview: { status: 'accepted', acceptedIds: [] },
   });
   assert.notEqual(required.outcome, 'final');
@@ -331,6 +445,7 @@ test('Gate A Presentation: required overflow downgrades while optional overflow 
     answerGoal: GOAL,
     frozenPrimaryClaimIds: ['primary'],
     acceptedClaimIds: ['primary', 'support'],
+    reviewedBindingClaimIds: ['primary', 'support'],
     visiblePromptReview: { status: 'accepted', acceptedIds: [] },
   });
   assert.equal(optional.primary[0].text, '合法主答。');
@@ -345,6 +460,7 @@ test('Gate A Presentation: required overflow downgrades while optional overflow 
     answerGoal: GOAL,
     frozenPrimaryClaimIds: ['primary'],
     acceptedClaimIds: ['primary', 'action'],
+    reviewedBindingClaimIds: ['primary', 'action'],
     visiblePromptReview: { status: 'accepted', acceptedIds: [] },
   });
   assert.equal(actionOverflow.actions.length, 0);
@@ -365,6 +481,7 @@ test('Gate A Presentation: prompt count and 300/301 code-point boundaries are en
     answerGoal: GOAL,
     frozenPrimaryClaimIds: ['primary'],
     acceptedClaimIds: ['primary'],
+    reviewedBindingClaimIds: ['primary'],
     visiblePromptReview: { status: 'accepted', acceptedIds },
   });
   assert.equal(projection.prompts.length, 5);

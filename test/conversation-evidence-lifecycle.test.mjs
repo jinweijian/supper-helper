@@ -59,6 +59,52 @@ function chatResponse(content) {
   );
 }
 
+function stageAwareModelFetch(presentationPayload) {
+  return async (_url, init) => {
+    const request = JSON.parse(init.body);
+    const system = request.messages[0]?.content ?? '';
+    const user = request.messages.find((message) => message.role === 'user')?.content ?? '{}';
+    if (system.includes('Evidence Coverage Agent')) {
+      const input = JSON.parse(user);
+      const bindings = input.claimSegments
+        .filter((claim) => claim.candidateAnswerItemIds.length > 0 && claim.evidenceIds.length > 0)
+        .map((claim) => ({
+          claimId: claim.id,
+          answerItemIds: claim.candidateAnswerItemIds,
+          evidenceIds: claim.evidenceIds,
+        }));
+      return chatResponse(JSON.stringify({
+        status: 'accepted',
+        bindings,
+        fullQuestion: input.claimSegments.some((claim) => claim.role === 'primary_answer') ? 'full' : 'partial',
+        fullQuestionClaimIds: input.claimSegments
+          .filter((claim) => claim.role === 'primary_answer')
+          .map((claim) => claim.id),
+        missingElements: [],
+      }));
+    }
+    if (system.includes('Visible Prompt Safety Agent')) {
+      return chatResponse(JSON.stringify({ status: 'accepted', acceptedIds: [] }));
+    }
+    return chatResponse(JSON.stringify(presentationPayload));
+  };
+}
+
+function withTestCoverageEvidence(response, request) {
+  return {
+    ...response,
+    coverageEvidence: response.result.evidence
+      .filter((item) => item.kind === 'workspace' && item.confidence !== 'low')
+      .map((item) => ({
+        evidenceId: item.id,
+        kind: 'workspace',
+        safeText: `测试只读适配器已重验 ${item.id}`,
+        runId: request.runId,
+        validated: true,
+      })),
+  };
+}
+
 function answerGoal(question, mustAnswerItems = ['direct_answer']) {
   return {
     rawUserQuestion: question,
@@ -701,18 +747,18 @@ test('model presentation reply is used and preserves multiple reviewed claims', 
 test('unsafe model presentation reply falls back to reviewed local formatting', async () => {
   const root = mkdtempSync(join(tmpdir(), 'super-helper-model-presentation-safe-'));
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => chatResponse(JSON.stringify({
+  globalThis.fetch = stageAwareModelFetch({
     answerTarget: '班课在哪配置的',
     directAnswer: '班课配置入口在后台教务参数设置。',
     reply: '请查看 src/private.ts，并把 caseId/runId 发给用户。',
     claimIds: ['claim_1'],
     evidenceIds: ['ev_01'],
     directAnswerClaimIds: ['claim_1'],
-  }));
+  });
   try {
     const worker = {
-      async diagnose() {
-        return {
+      async diagnose(request) {
+        return withTestCoverageEvidence({
           result: {
             status: 'concluded',
             summary: '已找到配置入口。',
@@ -722,7 +768,7 @@ test('unsafe model presentation reply falls back to reviewed local formatting', 
             recommendedNextAction: 'final_answer',
           },
           trace: { command: 'claude -p', cwd: process.cwd(), stdout: '{"result":"ok"}', stderr: '', exitCode: 0 },
-        };
+        }, request);
       },
     };
     const agent = new DiagnosticRuntime(modelConfig(root), new FileMemoryStore(root), worker);
@@ -739,18 +785,18 @@ test('unsafe model presentation reply falls back to reviewed local formatting', 
 test('model presentation reply must preserve every selected claim signal', async () => {
   const root = mkdtempSync(join(tmpdir(), 'super-helper-model-presentation-complete-'));
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => chatResponse(JSON.stringify({
+  globalThis.fetch = stageAwareModelFetch({
     answerTarget: '班课在哪配置的',
     directAnswer: '班课配置入口在后台教务参数设置。',
     reply: '班课配置入口在后台教务参数设置。',
     claimIds: ['claim_1', 'claim_2'],
     evidenceIds: ['ev_01', 'ev_02'],
     directAnswerClaimIds: ['claim_1', 'claim_2'],
-  }));
+  });
   try {
     const worker = {
-      async diagnose() {
-        return {
+      async diagnose(request) {
+        return withTestCoverageEvidence({
           result: {
             status: 'concluded',
             summary: '已找到班课配置入口和可配置项。',
@@ -766,7 +812,7 @@ test('model presentation reply must preserve every selected claim signal', async
             recommendedNextAction: 'final_answer',
           },
           trace: { command: 'claude -p', cwd: process.cwd(), stdout: '{"result":"ok"}', stderr: '', exitCode: 0 },
-        };
+        }, request);
       },
     };
     const agent = new DiagnosticRuntime(modelConfig(root), new FileMemoryStore(root), worker);
@@ -783,9 +829,7 @@ test('model presentation reply must preserve every selected claim signal', async
 test('runtime ignores a model attempt to promote a frozen partial result', async () => {
   const root = mkdtempSync(join(tmpdir(), 'super-helper-review-freeze-'));
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({
-    choices: [{ message: { content: JSON.stringify({ outcome: 'final_answer', reply: '模型虚构的最终结论' }) } }],
-  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  globalThis.fetch = stageAwareModelFetch({ outcome: 'final_answer', reply: '模型虚构的最终结论' });
   try {
     const config = defaultConfig();
     config.storage.rootDir = root;
@@ -795,16 +839,16 @@ test('runtime ignores a model attempt to promote a frozen partial result', async
       type: 'openai-compatible', baseUrl: 'https://api.example.test/v1', apiKey: 'test-key', model: 'test-model', temperature: 0,
     };
     const worker = {
-      async diagnose() {
-        return {
+      async diagnose(request) {
+        return withTestCoverageEvidence({
           result: {
             status: 'partial', summary: 'worker 未确认', missingInfo: ['服务日志'],
             evidence: [{ id: 'ev_partial', kind: 'workspace', source: 'src/router.ts', summary: '只定位到入口', confidence: 'medium' }],
-            claims: [{ type: 'inference', role: 'supporting_context', text: '目前只能确认请求经过该入口。', evidenceIds: ['ev_partial'], answers: [] }],
+            claims: [{ id: 'claim_partial', type: 'inference', role: 'supporting_context', text: '目前只能确认请求经过该入口。', evidenceIds: ['ev_partial'], answers: ['direct_answer'] }],
             recommendedNextAction: 'ask_user',
           },
           trace: { command: 'claude -p', cwd: process.cwd(), stdout: '{"result":"partial"}', stderr: '', exitCode: 0 },
-        };
+        }, request);
       },
     };
     const agent = new DiagnosticRuntime(config, new FileMemoryStore(root), worker);

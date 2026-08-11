@@ -30,6 +30,10 @@ test('Gate B worker prompt requires evidence-bound actionable claims and explici
   assert.match(prompt, /requires_authorization/);
   assert.match(prompt, /must not claim.*executed/i);
   assert.match(prompt, /Read, Glob, Grep/);
+  assert.match(
+    prompt,
+    /every .*mustAnswerItems.*MUST return status "concluded".*recommendedNextAction "final_answer"/i,
+  );
 });
 
 test('Gate B worker parser keeps only exact current item identities', () => {
@@ -48,6 +52,26 @@ test('Gate B worker parser keeps only exact current item identities', () => {
     }],
     recommendedNextAction: 'final_answer',
   }), request);
+  assert.deepEqual(result.claims[0].answers, ['如何开启 X']);
+});
+
+test('Gate B worker parser preserves exact item identities for relevant supporting context', () => {
+  const result = parseClaudeOutput(JSON.stringify({
+    status: 'partial',
+    summary: '线索',
+    missingInfo: [],
+    evidence: [{ id: 'ev_1', kind: 'workspace', source: 'src/config.ts:1-1', summary: '配置证据', confidence: 'high' }],
+    claims: [{
+      id: 'support_1',
+      type: 'fact',
+      role: 'supporting_context',
+      text: '当前配置文件存在该键。',
+      evidenceIds: ['ev_1'],
+      answers: ['如何开启 X', '伪造的别名'],
+    }],
+    recommendedNextAction: 'continue_diagnosis',
+  }), request);
+
   assert.deepEqual(result.claims[0].answers, ['如何开启 X']);
 });
 

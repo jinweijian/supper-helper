@@ -8,6 +8,7 @@ import {
   type KnowledgeQualityIssue,
   type KnowledgeQualityReport,
   type KnowledgeQualityThresholds,
+  type KnowledgeChunk,
 } from '../types.js';
 import { aggregateQualityIssues } from './aggregation.js';
 import { auditKnowledgeChunks } from './chunk-rules.js';
@@ -19,6 +20,7 @@ export interface AuditKnowledgeInput {
   workspaceRoot: string;
   thresholds?: Partial<KnowledgeQualityThresholds>;
   gate?: KnowledgeQualityGate;
+  chunks?: KnowledgeChunk[];
 }
 
 export function auditKnowledgeQuality(input: AuditKnowledgeInput): KnowledgeQualityReport {
@@ -29,7 +31,7 @@ export function auditKnowledgeQuality(input: AuditKnowledgeInput): KnowledgeQual
   const sources = loadSourceDocuments(input.workspaceRoot);
   const knownSourceBlockIds = auditSourceDocuments(input.workspaceRoot, sources, issues);
   auditSliceDocuments(documents, thresholds, issues, knownSourceBlockIds);
-  const chunkCount = auditKnowledgeChunks(documents, input.workspaceRoot, issues);
+  const chunkCount = auditKnowledgeChunks(documents, input.workspaceRoot, issues, input.chunks);
   issues.sort((left, right) => left.code.localeCompare(right.code)
     || (left.documentId ?? '').localeCompare(right.documentId ?? ''));
   return {

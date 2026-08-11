@@ -1,6 +1,10 @@
 import { join } from 'node:path';
 import { defaultConfig, ensureConfig, type SuperHelperConfig } from '../../config.js';
 import { resolveKnowledgeWorkspaceRoot } from '../../knowledge/index.js';
+import {
+  FileSecretsRepository,
+  materializeConfigSecrets,
+} from '../../onboarding/index.js';
 import type { EmbeddingProviderConfig } from '../../providers/embedding/contract.js';
 import { hasFlag, readOption } from '../args.js';
 
@@ -15,7 +19,9 @@ export interface KnowledgeCommandContext {
 export function resolveKnowledgeCommandContext(argv: string[]): KnowledgeCommandContext {
   const explicit = readOption(argv, '--workspace') ?? readOption(argv, '--path');
   const explicitKnowledgeRoot = readOption(argv, '--knowledge-root');
-  const config = explicit && explicitKnowledgeRoot ? defaultConfig() : ensureConfig();
+  const config = explicit && explicitKnowledgeRoot
+    ? defaultConfig()
+    : materializeKnowledgeCommandConfig(ensureConfig());
 
   if (explicit) {
     config.workspaces[0] = {
@@ -35,6 +41,13 @@ export function resolveKnowledgeCommandContext(argv: string[]): KnowledgeCommand
     projectWorkspaceRoot: config.workspaces[0]?.rootPath ?? process.cwd(),
     knowledgeWorkspaceRoot: resolveKnowledgeWorkspaceRoot(config, config.workspaces[0]?.id),
   };
+}
+
+export function materializeKnowledgeCommandConfig(config: SuperHelperConfig): SuperHelperConfig {
+  return materializeConfigSecrets(
+    config,
+    new FileSecretsRepository(config.storage.rootDir),
+  );
 }
 
 export function resolveSourcePath(workspaceRoot: string, relativeOrAbsolute: string): string {

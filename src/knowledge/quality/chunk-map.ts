@@ -11,6 +11,7 @@ export function loadChunkQualityMap(workspaceRoot: string): Map<string, ChunkQua
   if (!report) return map;
   for (const issue of report.issues) {
     if (!issue.documentId) continue;
+    if (issue.source?.includes('knowledge/_pipeline/drafts/')) continue;
     const current = map.get(issue.documentId) ?? { severity: 'ok' as const, issues: [] };
     if (issue.severity === 'error') current.severity = 'error';
     else if (issue.severity === 'warn' && current.severity !== 'error') current.severity = 'warn';

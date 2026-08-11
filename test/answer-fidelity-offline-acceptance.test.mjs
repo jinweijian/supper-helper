@@ -219,6 +219,8 @@ function fakeStageModel(counts, presentationMode) {
             { claimId: 'primary_config', answerItemIds: [HOW], evidenceIds: ['ev_config'] },
             { claimId: 'primary_scope', answerItemIds: [HOW], evidenceIds: ['ev_scope'] },
             { claimId: 'primary_effect', answerItemIds: [WHEN], evidenceIds: ['ev_effect'] },
+            { claimId: 'action_inspect', answerItemIds: [HOW], evidenceIds: ['ev_config'] },
+            { claimId: 'action_change', answerItemIds: [HOW, WHEN], evidenceIds: ['ev_config', 'ev_effect'] },
           ],
           fullQuestion: 'full',
           fullQuestionClaimIds: ['primary_config', 'primary_scope', 'primary_effect'],

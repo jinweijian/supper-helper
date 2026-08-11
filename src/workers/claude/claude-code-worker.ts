@@ -92,7 +92,7 @@ export class ClaudeCodeWorker implements DiagnosticWorker {
     return {
       result,
       trace,
-      coverageEvidence: currentWorkerCoverageEvidence(request, result),
+      coverageEvidence: currentWorkerCoverageEvidence(request, result, workspace.rootPath),
     };
   }
 

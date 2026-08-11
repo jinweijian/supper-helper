@@ -333,7 +333,7 @@ test('real Runtime performs two serial MCP calls and passes only normalized resu
   }
 });
 
-test('real Runtime reviews a fully covered MCP envelope and skips Worker', async () => {
+test('real Runtime keeps MCP output non-final when the independent reviewer is unavailable', async () => {
   const root = mkdtempSync(join(tmpdir(), 'mcp-runtime-full-'));
   const config = defaultConfig();
   config.storage.rootDir = root;
@@ -357,7 +357,9 @@ test('real Runtime reviews a fully covered MCP envelope and skips Worker', async
     const runtime = new DiagnosticRuntime(config, new FileMemoryStore(root), worker);
     const response = await runtime.handleUserMessage({ workspaceId: 'current', message: '请确认配置证据路径。' });
     assert.equal(workerCalls, 0);
-    assert.match(response.assistantMessage, /MCP 已确认配置证据路径/);
+    assert.doesNotMatch(response.assistantMessage, /MCP 已确认配置证据路径/);
+    assert.match(response.assistantMessage, /证据不足|不能作为最终结论/);
+    assert.notEqual(response.caseSession.runs.at(-1).result.recommendedNextAction, 'final_answer');
     assert.equal(response.caseSession.runs.at(-1).result.evidence[0].kind, 'mcp');
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -476,7 +478,7 @@ test('MCP adapter exposes coverage only for a validated current read-only allowl
       async listTools() { return [{ name: 'lookup' }]; },
       async callTool() {
         return {
-          content: [{ type: 'text', text: '适配器规范化后的当前证据' }],
+          content: [{ type: 'text', text: 'RAW_MCP_TEXT sk-live-secret-1234567890' }],
           structuredContent: {
             superHelperEvidence: {
               confidence: 'high',
@@ -517,7 +519,7 @@ test('MCP adapter exposes coverage only for a validated current read-only allowl
   assert.equal(result?.status, 'concluded');
   assert.deepEqual(service.currentCoverageEvidence(request), [{
     evidenceId: 'mcp_ev_01',
-    safeText: '适配器规范化后的当前证据',
+    safeText: '当前配置已经开启',
     runId: 'run_01',
     validated: true,
     readOnly: true,

@@ -1,4 +1,10 @@
-import { ensureConfig } from '../config.js';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  configPath,
+  defaultConfig,
+  loadConfig,
+} from '../config.js';
 import {
   runEmbeddingSmokeTest,
   type EmbeddingProviderConfig,
@@ -7,6 +13,10 @@ import {
   runRerankSmokeTest,
   type RerankProviderConfig,
 } from '../providers/rerank/index.js';
+import {
+  FileSecretsRepository,
+  materializeConfigSecrets,
+} from '../onboarding/index.js';
 import { hasFlag, readNumberOption, readOption } from './args.js';
 
 export async function runProviderCommand(input: {
@@ -21,7 +31,7 @@ export async function runProviderCommand(input: {
     process.exit(1);
   }
 
-  const config = ensureConfig(readOption(input.argv, '--home'));
+  const config = loadProviderCommandConfig(readOption(input.argv, '--home'));
   if (input.capability === 'embedding') {
     const embedding = embeddingConfigFromFlags(config.embedding, input.argv);
     const result = await runEmbeddingSmokeTest({ config: embedding, force: hasFlag(input.argv, '--enable') });
@@ -66,6 +76,19 @@ export async function runProviderCommand(input: {
   if (!result.ok) {
     process.exit(1);
   }
+}
+
+export function loadProviderCommandConfig(homeDir?: string) {
+  const path = configPath(homeDir);
+  const config = existsSync(path) ? loadConfig(path) : defaultConfig();
+  if (homeDir) {
+    config.storage.rootDir = homeDir;
+    config.knowledge.rootDir = join(homeDir, 'knowledge');
+  }
+  return materializeConfigSecrets(
+    config,
+    new FileSecretsRepository(homeDir ?? config.storage.rootDir),
+  );
 }
 
 function embeddingConfigFromFlags(existing: EmbeddingProviderConfig, argv: string[]): EmbeddingProviderConfig {

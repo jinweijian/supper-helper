@@ -55,6 +55,7 @@
 - 当前 Worker workspace evidence 与 allowlisted read-only MCP evidence 可经同一 source-neutral coverage contract 保持合法 final；raw summary/secret/path 不进入 reviewer。Experience 中无法由当前 resolver 重验的非知识 evidence 不得 direct replay。
 - 固定 `production-eval-50.json` 上 Recall@5、MRR、direct precision、no-hit abstention 和 must-escalate 均不低于改动前记录基线；新增多步骤、域外文档、无完整 span 用例全部通过。
 - v3 artifact 可读但始终 `legacy=true` 且不可用于严格直答；无法安全收敛的 undersized v4 child 也不可严格直答。v4 rebuild 生成不可变 generation，只由 knowledge-owned publisher 在 writer lock + expected-active CAS 下原子切换 `active.json`；失败、崩溃或双 publisher 竞态不暴露混合代际或丢失更新。
+- 在用户显式授权的真实配置下，`/api/chat` → runtime → 真实 worker/provider → review → Presentation 端到端验收必须覆盖多项问题、代码证据与整份回复安全，并最终形成 reviewed `final_answer`；任一必需 reviewer/provider 为 `NOT_RUN`、知识证据质量失败或结果停留在 partial 时不得关闭 change。
 - HTTP response shape、Case JSON shape、`DiagnosticRequest`/`DiagnosticResult` 现有字段保持兼容。
 
 ## Impact

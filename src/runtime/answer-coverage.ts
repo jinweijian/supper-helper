@@ -91,9 +91,15 @@ export function materializeCoverageReviewInput(input: {
   evidence: Evidence[];
   provenance: Record<string, CoverageEvidenceProvenance | undefined>;
 }): CoverageReviewInput {
+  const currentAnswerItems = new Set(input.answerGoal.mustAnswerItems);
   const candidateClaims = input.claims.filter((item) => (
     (item.type === 'fact' || item.type === 'inference') &&
-    item.role === 'primary_answer'
+    (
+      item.role === 'primary_answer' ||
+      item.role === 'next_action' ||
+      item.role === 'supporting_context'
+    ) &&
+    item.answers.some((answerItem) => currentAnswerItems.has(answerItem))
   ));
   if (candidateClaims.length > COVERAGE_LIMITS.claims) {
     throw new CoverageMaterializationError('coverage_claim_limit');

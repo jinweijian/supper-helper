@@ -240,6 +240,48 @@ test('Gate A: contradictory or unbounded coverage review output is rejected and 
   }, input);
   assert.equal(contradictory.status, 'unknown');
 
+  const emptyFullSet = validateAnswerCoverageReview({
+    status: 'accepted',
+    bindings: [{
+      claimId: 'primary_full',
+      answerItemIds: GOAL.mustAnswerItems,
+      evidenceIds: ['ev_primary'],
+    }],
+    fullQuestion: 'full',
+    fullQuestionClaimIds: [],
+    missingElements: [],
+  }, input);
+  assert.equal(emptyFullSet.status, 'unknown');
+
+  const emptyEvidenceBinding = validateAnswerCoverageReview({
+    status: 'accepted',
+    bindings: [{
+      claimId: 'primary_full',
+      answerItemIds: GOAL.mustAnswerItems,
+      evidenceIds: [],
+    }],
+    fullQuestion: 'full',
+    fullQuestionClaimIds: ['primary_full'],
+    missingElements: [],
+  }, input);
+  assert.equal(emptyEvidenceBinding.status, 'unknown');
+
+  const undeclaredItemBinding = validateAnswerCoverageReview({
+    status: 'accepted',
+    bindings: [{
+      claimId: 'primary_full',
+      answerItemIds: GOAL.mustAnswerItems,
+      evidenceIds: ['ev_primary'],
+    }],
+    fullQuestion: 'full',
+    fullQuestionClaimIds: ['primary_full'],
+    missingElements: [],
+  }, {
+    ...input,
+    claimSegments: [{ ...input.claimSegments[0], candidateAnswerItemIds: ['如何开启 X'] }],
+  });
+  assert.equal(undeclaredItemBinding.status, 'unknown');
+
   const secret = unknownCoverageReview(`token=sk-${'a'.repeat(40)} ${'长'.repeat(300)}`);
   assert.doesNotMatch(secret.reason, /sk-|a{20}/);
   assert.ok(Array.from(secret.reason).length <= 160);
@@ -266,6 +308,9 @@ test('Gate A: source-neutral materializer accepts current workspace and MCP evid
   const claims = [
     claim('workspace_claim', ['如何开启 X'], ['ev_workspace']),
     claim('mcp_claim', ['多久生效'], ['ev_mcp']),
+    claim('workspace_action', ['如何开启 X'], ['ev_workspace'], { role: 'next_action', type: 'inference' }),
+    claim('workspace_support', ['如何开启 X'], ['ev_workspace'], { role: 'supporting_context' }),
+    claim('unrelated_support', [], ['ev_unreviewed'], { role: 'supporting_context' }),
   ];
   const input = materializeCoverageReviewInput({
     answerGoal: GOAL,
@@ -278,6 +323,12 @@ test('Gate A: source-neutral materializer accepts current workspace and MCP evid
   });
 
   assert.deepEqual(input.evidenceSegments.map((item) => item.kind), ['workspace', 'mcp']);
+  assert.deepEqual(input.claimSegments.map((item) => item.id), [
+    'workspace_claim',
+    'mcp_claim',
+    'workspace_action',
+    'workspace_support',
+  ]);
   const serialized = JSON.stringify(input);
   assert.doesNotMatch(serialized, /RAW_SUMMARY_MUST_NOT_LEAK|RAW_SOURCE_MUST_NOT_LEAK/);
 });
@@ -339,20 +390,20 @@ test('Gate A: coverage materializer enforces whole-item and batch bounds without
     item.id,
     { freshness: 'same_run', safeText: '丙'.repeat(960) },
   ]));
-  exactTotalProvenance.ev_total_24 = { freshness: 'same_run', safeText: '丙'.repeat(959) };
+  exactTotalProvenance.ev_total_24 = { freshness: 'same_run', safeText: '丙'.repeat(958) };
   assert.doesNotThrow(() => materializeCoverageReviewInput({
-    answerGoal: { ...GOAL, resolvedQuestion: '', mustAnswerItems: [] },
-    claims: [claim('total_exact', [], totalEvidence.map((item) => item.id), { text: '答' })],
+    answerGoal: { ...GOAL, resolvedQuestion: '', mustAnswerItems: ['答'] },
+    claims: [claim('total_exact', ['答'], totalEvidence.map((item) => item.id), { text: '答' })],
     evidence: totalEvidence,
     provenance: exactTotalProvenance,
   }));
   assert.throws(() => materializeCoverageReviewInput({
-    answerGoal: { ...GOAL, resolvedQuestion: '', mustAnswerItems: [] },
-    claims: [claim('total_overflow', [], totalEvidence.map((item) => item.id), { text: '答' })],
+    answerGoal: { ...GOAL, resolvedQuestion: '', mustAnswerItems: ['答'] },
+    claims: [claim('total_overflow', ['答'], totalEvidence.map((item) => item.id), { text: '答' })],
     evidence: totalEvidence,
     provenance: {
       ...exactTotalProvenance,
-      ev_total_24: { freshness: 'same_run', safeText: '丙'.repeat(960) },
+      ev_total_24: { freshness: 'same_run', safeText: '丙'.repeat(959) },
     },
   }), /coverage_.*limit/);
 });

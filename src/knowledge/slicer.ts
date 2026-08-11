@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sourceDraftReportPath, sourceDraftRoot } from './paths.js';
 import type {
@@ -108,6 +108,14 @@ export function buildDraftSlices(input: BuildDraftSlicesInput): BuildDraftSlices
   };
 
   writeFileSync(sourceDraftReportPath(input.workspaceRoot, input.sourceDocumentId), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  const currentDraftPaths = new Set(draftPaths);
+  for (const name of readdirSync(draftRoot)) {
+    if (!name.endsWith('.md')) continue;
+    const path = join(draftRoot, name);
+    if (!currentDraftPaths.has(path) && statSync(path).isFile()) {
+      rmSync(path);
+    }
+  }
   return { draftIds, report, draftPaths };
 }
 

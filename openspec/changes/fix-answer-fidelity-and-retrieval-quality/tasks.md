@@ -188,6 +188,8 @@
 - [x] 16.1 仅在用户明确授权且设置唯一开关 `SUPER_HELPER_REAL_ACCEPTANCE=1` 时运行真实 model/embedding/知识目录验收；缺开关即使凭据存在也必须安全跳过并记 `NOT_RUN`，不得由默认 `pnpm test` 触发
 - [x] 16.2 将每项真实验收记录为 `PASS`、`FAIL` 或 `NOT_RUN`；`NOT_RUN` 不能标成通过，也不能覆盖离线失败
 - [x] 16.3 真实运行日志不得写入凭据、完整 provider payload、完整 retrieval text 或用户知识正文
+- [x] 16.4 新增 `acceptance:answer-fidelity:real`：通过正式 `/api/chat` 执行真实多项问题，验证真实 worker、代码证据、必答项覆盖、整份回复安全和 reviewed final；命令必须受唯一开关保护并自动删除 case、关闭临时 server
+- [x] 16.5 在用户真实配置上使 model、embedding、rerank、active v4 knowledge、worker、双问题覆盖、整份回复安全与 reviewed final 全部 PASS；任何 `NOT_RUN`、knowledge quality blocker 或 partial 均不得勾选
 
 ## Anti-Fake-Complete
 
@@ -196,7 +198,7 @@
 - [x] 17.3 对生产 seam 做 mutation/failure-injection：分别临时恢复 rejection 连坐、信任 producer `answers`/proposer 自评、忽略 `fullQuestionClaimIds`、让 coverage reviewer 接收 raw Evidence summary/source 或陈旧非知识 evidence、跳过 prompt-safety review、让 renderer 接收 raw result、让 Experience 包装历史 reply/只比 sentinel/不对当前 evidence 重审、让 embedding 使用 canonical text、信任 persisted `legacy=false`、允许 undersized child 直答、移除 publisher lock/CAS 或逐文件发布 generation、把 span 截至 500；对应 production-composition/focused test 必须失败，恢复生产代码后通过。仅反转测试断言不算证据
 - [x] 17.4 用 `rg` 复查所有 v2/v3/`parent-child-v3` hardcode、所有用户 reply builder、所有 answer-bearing pattern、所有 `mustAnswerItems` producer/consumer、所有 Evidence kind producer 与 current-source resolver，逐项记录“更新/兼容保留/不适用”
 - [x] 17.5 核对所有任务勾选均有证据链接；外部依赖、真实 provider 与真实迁移若不适用必须明确 `N/A`/`NOT_RUN`，不得留空冒充完成
-- [ ] 17.6 由非原实现者的独立 reviewer 对 spec ↔ implementation ↔ tests ↔ implementation-notes 做反向审计；记录 reviewer 身份/执行主体、日期、reviewed commit/diff identity、逐项 production-path 结论、findings 与关闭证据，重点找能绕过 safe projection、`fullQuestionClaimIds`、source-neutral coverage/freshness、独立 completeness/coverage/prompt reviews、Experience current-evidence eligibility、undersized-child 限制和 publisher lock/CAS 的路径
+- [x] 17.6 由非原实现者的独立 reviewer 对 spec ↔ implementation ↔ tests ↔ implementation-notes 做反向审计；记录 reviewer 身份/执行主体、日期、reviewed commit/diff identity、逐项 production-path 结论、findings 与关闭证据，重点找能绕过 safe projection、`fullQuestionClaimIds`、source-neutral coverage/freshness、独立 completeness/coverage/prompt reviews、Experience current-evidence eligibility、undersized-child 限制和 publisher lock/CAS 的路径
 
 ## 18. 最终验证与完成闸门
 
@@ -210,4 +212,4 @@
 - [x] 18.8 运行 Gate A/B/C 与 cross-gate focused/acceptance suites
 - [x] 18.9 `git diff --check`
 - [x] 18.10 把所有命令、退出码、关键指标、NOT_RUN/N/A、已知风险和 rollback 结果写入 `implementation-notes.md`
-- [ ] 18.11 仅当 proposal Success Criteria、三个 Gate、cross-gate golden cases、兼容测试和 Anti-Fake-Complete 全部满足时，才将 change 标记完成；任一 required check 未通过不得归档
+- [x] 18.11 仅当 proposal Success Criteria、三个 Gate、cross-gate golden cases、兼容测试和 Anti-Fake-Complete 全部满足时，才将 change 标记完成；任一 required check 未通过不得归档

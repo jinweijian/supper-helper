@@ -5,7 +5,8 @@ import type {
   DiagnosticResult,
   EvidenceKind,
 } from '../domain.js';
-import { redactSecretText } from '../redaction.js';
+import { redactInternalPaths, redactSecretText } from '../redaction.js';
+import { redactCompatibilitySentinels } from './safe-answer-redaction.js';
 
 const REQUIRED_SEGMENT_LIMIT = 1000;
 const SUPPORTING_SEGMENT_LIMIT = 600;
@@ -96,9 +97,11 @@ export function buildSafeFrozenAnswerProjection(input: {
   answerGoal: AnswerGoal;
   frozenPrimaryClaimIds: string[];
   acceptedClaimIds: string[];
+  reviewedBindingClaimIds?: string[];
   visiblePromptReview?: VisiblePromptReview;
 }): SafeFrozenAnswerProjection {
   const acceptedIds = new Set(input.acceptedClaimIds);
+  const reviewedBindingIds = new Set(input.reviewedBindingClaimIds ?? []);
   const claimById = new Map(
     input.result.claims
       .filter((claim): claim is DiagnosticClaim & { id: string } => Boolean(claim.id) && acceptedIds.has(claim.id!))
@@ -113,7 +116,8 @@ export function buildSafeFrozenAnswerProjection(input: {
     ? [...claimById.values()]
         .filter((claim) => (
           claim.role === 'primary_answer' &&
-          (claim.type === 'fact' || claim.type === 'inference')
+          (claim.type === 'fact' || claim.type === 'inference') &&
+          reviewedBindingIds.has(claim.id)
         ))
         .map((claim) => claim.id)
     : [];
@@ -131,7 +135,7 @@ export function buildSafeFrozenAnswerProjection(input: {
 
   const actions: SafeAnswerSegment[] = [];
   for (const claim of claimById.values()) {
-    if (claim.role !== 'next_action') continue;
+    if (claim.role !== 'next_action' || !reviewedBindingIds.has(claim.id)) continue;
     const segment = materializeClaim(claim, REQUIRED_SEGMENT_LIMIT);
     if (!segment) {
       blockerCodes.push('required_action_materialization_failed');
@@ -144,7 +148,8 @@ export function buildSafeFrozenAnswerProjection(input: {
   for (const claim of claimById.values()) {
     if (
       claim.role !== 'supporting_context' ||
-      (claim.type !== 'fact' && claim.type !== 'inference')
+      (claim.type !== 'fact' && claim.type !== 'inference') ||
+      !reviewedBindingIds.has(claim.id)
     ) {
       continue;
     }
@@ -190,7 +195,7 @@ export function buildSafeFrozenAnswerProjection(input: {
       return [];
     }
     const text = safeVisibleText(claims.map((item) => item.text).join('；'));
-    if (!text || codePointLength(text) > REQUIRED_SEGMENT_LIMIT) {
+    if (!hasSubstantiveVisibleText(text) || codePointLength(text) > REQUIRED_SEGMENT_LIMIT) {
       if (requiredEvidenceIds.includes(id)) blockerCodes.push('required_evidence_materialization_failed');
       return [];
     }
@@ -232,7 +237,7 @@ export function buildSafeFrozenAnswerProjection(input: {
 function materializeClaim(claim: DiagnosticClaim & { id?: string }, limit: number): SafeAnswerSegment | undefined {
   if (!claim.id || (claim.type !== 'fact' && claim.type !== 'inference')) return undefined;
   const text = safeVisibleText(claim.text);
-  if (!text || codePointLength(text) > limit) return undefined;
+  if (!hasSubstantiveVisibleText(text) || codePointLength(text) > limit) return undefined;
   return {
     id: claim.id,
     text,
@@ -247,28 +252,30 @@ function materializePrompt(
   source: SafePromptSegment['source'],
 ): SafePromptSegment | undefined {
   const text = safeVisibleText(value);
-  if (!text || codePointLength(text) > PROMPT_SEGMENT_LIMIT) return undefined;
+  if (!hasSubstantiveVisibleText(text) || codePointLength(text) > PROMPT_SEGMENT_LIMIT) return undefined;
   return { id, text, source };
 }
 
 function safeAnswerTarget(value: string): string {
   const safe = safeVisibleText(value);
-  if (!safe) return '当前问题';
+  if (!hasSubstantiveVisibleText(safe)) return '当前问题';
   return Array.from(safe).slice(0, 160).join('');
 }
 
+function hasSubstantiveVisibleText(value: string): boolean {
+  const withoutPlaceholders = value
+    .replace(/\[(?:REDACTED|内部诊断信息已隐藏)\]/gi, '')
+    .replace(/[\s，。；、,:：;.!！?？()（）\[\]{}]+/g, '');
+  return /[\p{L}\p{N}]/u.test(withoutPlaceholders);
+}
+
 function safeVisibleText(value: string): string {
-  return redactInternalPaths(redactSecretText(value))
+  return redactCompatibilitySentinels(redactInternalPaths(redactSecretText(value)))
+    .replace(/\b(?:stdout|stderr|provider[_ -]?payload|worker[_ -]?trace)\s*[:=][^\n]*/gi, '[内部诊断信息已隐藏]')
+    .replace(/\b(?:worker[_ -]?trace|provider[_ -]?payload)\b/gi, '内部诊断信息')
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-function redactInternalPaths(value: string): string {
-  return value
-    .replace(/knowledge\/(?:_sources|faq|whitepapers)\/[^\s，。；)）\]]+/gi, '内部资料')
-    .replace(/\/(?:Users|home)\/[^\s，。；)）\]]+/g, '内部路径')
-    .replace(/[A-Za-z]:\\[^\s，。；)）\]]+/g, '内部路径');
 }
 
 function outcomeFromResult(result: DiagnosticResult): FrozenAnswerOutcome {

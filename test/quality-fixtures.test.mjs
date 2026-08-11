@@ -2,14 +2,18 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 import {
   auditKnowledgeQuality,
   discoverKnowledgeDocuments,
   evaluateQualityGate,
   initKnowledgeWorkspace,
+  loadChunkQualityMap,
+  publishKnowledgeGeneration,
+  readActiveKnowledgeGeneration,
   updateKnowledgeIndex,
+  writeKnowledgeQualityReport,
 } from '../dist/knowledge/index.js';
 
 function tempWorkspace() {
@@ -123,17 +127,39 @@ quality_status: ok
 
 # AI伴学助手功能清单
 
-AI伴学助手支持学习计划制定、督学提醒、学习问答、题目答疑和知识点诊断。
+AI伴学助手支持学习计划制定、督学提醒、学习问答、题目答疑和知识点诊断。AI伴学助手还支持按学习计划持续提醒，并根据课程内容提供有来源的学习辅助说明。
 `;
     writeFileSync(join(publishedDir, 'mirror.md'), body, 'utf8');
     writeFileSync(join(draftDir, '001-mirror.md'), body.replace('status: active', 'status: draft'), 'utf8');
     updateKnowledgeIndex({ workspaceRoot: workspace });
 
     const report = auditKnowledgeQuality({ workspaceRoot: workspace });
+    const missingParentIssues = report.issues.filter((issue) => (
+      issue.code === 'missing_parent' && issue.documentId === 'kb_mirror_feature'
+    ));
+    assert.deepEqual(
+      missingParentIssues,
+      [],
+      'quality audit must read chunks from the active generation instead of stale flat artifacts',
+    );
     const duplicateIssues = report.issues.filter((issue) => (
       issue.code === 'duplicate_content' && issue.documentId === 'kb_mirror_feature'
     ));
     assert.deepEqual(duplicateIssues, []);
+    writeKnowledgeQualityReport({
+      workspaceRoot: workspace,
+      report: {
+        ...report,
+        issues: [{
+          code: 'missing_parent',
+          severity: 'warn',
+          message: 'draft mirror has no published parent',
+          documentId: 'kb_mirror_feature',
+          source: 'knowledge/_pipeline/drafts/src_mirror/001-mirror.md',
+        }],
+      },
+    });
+    assert.equal(loadChunkQualityMap(workspace).get('kb_mirror_feature'), undefined);
   } finally {
     cleanup(workspace);
   }
@@ -173,12 +199,13 @@ test('7.7 fixture: orphan chunk is flagged error when parent is missing', () => 
   const workspace = tempWorkspace();
   try {
     initKnowledgeWorkspace({ workspaceRoot: workspace });
-    updateKnowledgeIndex({ workspaceRoot: workspace });
-    // Inject a chunk whose parent_id does not exist in the indexed documents.
-    const chunkPath = join(workspace, 'knowledge', 'indexes', 'chunks.jsonl');
+    const update = updateKnowledgeIndex({ workspaceRoot: workspace });
+    // Publish a complete generation containing a chunk whose parent_id does not exist.
     const badChunk = {
       chunk_id: 'chk_orphan_001',
       parent_id: 'kb_does_not_exist',
+      artifact_version: 4,
+      chunking_strategy: 'parent-child-v4',
       source: 'knowledge/faq/general/orphan.md',
       source_document: 'knowledge/_sources/whitepapers/test.docx',
       source_document_id: 'src_orphan',
@@ -191,7 +218,18 @@ test('7.7 fixture: orphan chunk is flagged error when parent is missing', () => 
       keywords: ['orphan'],
       text: 'orphan chunk text',
     };
-    writeFileSync(chunkPath, JSON.stringify(badChunk) + '\n', 'utf8');
+    const manifest = JSON.parse(readFileSync(update.manifestPath, 'utf8'));
+    manifest.chunk_count += 1;
+    publishKnowledgeGeneration({
+      workspaceRoot: workspace,
+      expectedActiveGenerationId: readActiveKnowledgeGeneration(workspace)?.generation_id,
+      mode: 'bm25_only',
+      files: {
+        'chunks.jsonl': `${readFileSync(update.chunksPath, 'utf8')}${JSON.stringify(badChunk)}\n`,
+        'manifest.json': `${JSON.stringify(manifest, null, 2)}\n`,
+        'keyword-index.json': readFileSync(join(dirname(update.chunksPath), 'keyword-index.json'), 'utf8'),
+      },
+    });
     const report = auditKnowledgeQuality({ workspaceRoot: workspace });
     const issue = report.issues.find((i) => i.code === 'orphan_chunk');
     assert.ok(issue, 'expected orphan_chunk issue');

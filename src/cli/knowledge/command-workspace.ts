@@ -3,6 +3,10 @@ import {
   initKnowledgeWorkspace,
 } from '../../knowledge/index.js';
 import { rebuildKnowledgeArtifactsWithQuality } from '../../application/knowledge-rebuild-service.js';
+import type { EmbeddingDocumentPort } from '../../contracts/embedding.js';
+import type { SuperHelperConfig } from '../../config.js';
+import { createEmbeddingProvider } from '../../providers/embedding/factory.js';
+import { resolveApiKey } from '../../providers/http.js';
 import { hasFlag, readOption } from '../args.js';
 import type { KnowledgeCommandContext } from './context.js';
 import { readQualityGateArg } from './context.js';
@@ -53,8 +57,14 @@ export async function runKnowledgeWorkspaceCommand(
       workspaceRoot,
       qualityGate: gate,
       chunking: context.config.knowledge.chunking,
+      embedding: createKnowledgeRebuildEmbedding(context.config),
     });
     const result = rebuilt.index;
+    if (!rebuilt.published && result.qualityGateResult && !result.qualityGateResult.passed) {
+      printQualitySummary(result);
+      console.error(`gate failed before publish: ${result.qualityGateResult.reason}`);
+      process.exit(result.qualityGateResult.exitCode);
+    }
     console.log('knowledge index updated');
     console.log(`workspace: ${context.projectWorkspaceRoot}`);
     console.log(`knowledge workspace: ${workspaceRoot}`);
@@ -73,4 +83,25 @@ export async function runKnowledgeWorkspaceCommand(
   }
 
   return false;
+}
+
+export function createKnowledgeRebuildEmbedding(
+  config: SuperHelperConfig,
+  providerFactory: (providerConfig: SuperHelperConfig['embedding']) => EmbeddingDocumentPort = createEmbeddingProvider,
+): {
+  enabled: true;
+  provider: EmbeddingDocumentPort;
+  config: SuperHelperConfig['embedding'];
+} | undefined {
+  if (
+    !config.embedding.enabled ||
+    (config.embedding.provider !== 'fake' && !resolveApiKey(config.embedding))
+  ) {
+    return undefined;
+  }
+  return {
+    enabled: true,
+    provider: providerFactory(config.embedding),
+    config: config.embedding,
+  };
 }

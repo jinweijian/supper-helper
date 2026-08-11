@@ -40,6 +40,7 @@
     "acceptance:mcp:local": "pnpm build && node --test test/mcp-runtime.test.mjs",
     "acceptance:knowledge:local": "pnpm build && node --test test/knowledge-local-acceptance.test.mjs",
     "acceptance:answer-fidelity:offline": "pnpm build && node --test test/answer-fidelity-offline-acceptance.test.mjs",
+    "acceptance:answer-fidelity:real": "pnpm build && node scripts/verify-answer-fidelity-real.mjs",
     "audit:answer-fidelity:mutations": "node scripts/verify-answer-fidelity-mutations.mjs",
     "typecheck": "tsc --noEmit && vue-tsc --noEmit -p web/tsconfig.json",
     "typecheck:web": "vue-tsc --noEmit -p web/tsconfig.json",

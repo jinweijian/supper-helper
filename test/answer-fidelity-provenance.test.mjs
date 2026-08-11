@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import test from 'node:test';
 
 async function api() {
@@ -235,30 +238,54 @@ test('coverage materializer: production entry resolves every source envelope bef
   assert.doesNotMatch(JSON.stringify(reviewInput), /RAW_SOURCE|RAW_SUMMARY|历史回复不得进入/);
 });
 
-test('worker adapter emits only bounded redacted excerpts tied to the current run', async () => {
+test('worker adapter re-reads a bounded workspace locator instead of trusting producer summary', async () => {
   const { currentWorkerCoverageEvidence } = await import(
     '../dist/workers/claude/coverage-evidence.js'
   );
-  const excerpts = currentWorkerCoverageEvidence(
-    { runId: 'run_current' },
-    {
-      evidence: [
-        evidence('ev_safe', 'workspace'),
-        evidence('ev_low', 'workspace'),
-        evidence('ev_history', 'history'),
-      ].map((item) => (
-        item.id === 'ev_safe'
-          ? { ...item, summary: '配置位于 /Users/alice/private.ts，token=sk-secret-value' }
-          : item.id === 'ev_low'
-            ? { ...item, confidence: 'low' }
-            : item
-      )),
-    },
-  );
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'worker-evidence-'));
+  try {
+    mkdirSync(join(workspaceRoot, 'src'));
+    writeFileSync(
+      join(workspaceRoot, 'src', 'config.ts'),
+      'const unrelated = true;\nexport const provider = "embedding";\nconst tail = false;\n',
+      'utf8',
+    );
+    writeFileSync(join(workspaceRoot, 'src', 'oversized.log'), 'x'.repeat(2_000_001), 'utf8');
+    execFileSync('mkfifo', [join(workspaceRoot, 'src', 'blocking.pipe')]);
+    const excerpts = currentWorkerCoverageEvidence(
+      { runId: 'run_current' },
+      {
+        evidence: [
+          {
+            ...evidence('ev_safe', 'workspace'),
+            source: 'src/config.ts:2-2',
+            summary: 'PRODUCER_FORGED_SUMMARY sk-live-secret-1234567890',
+          },
+          { ...evidence('ev_unresolved', 'workspace'), source: 'src/missing.ts:1-1' },
+          { ...evidence('ev_oversized', 'workspace'), source: 'src/oversized.log:1-1' },
+          { ...evidence('ev_fifo', 'workspace'), source: 'src/blocking.pipe:1-1' },
+          { ...evidence('ev_low', 'workspace'), source: 'src/config.ts:2-2', confidence: 'low' },
+          evidence('ev_history', 'history'),
+        ],
+      },
+      workspaceRoot,
+    );
 
-  assert.deepEqual(excerpts.map((item) => item.evidenceId), ['ev_safe']);
-  assert.equal(excerpts[0].runId, 'run_current');
-  assert.doesNotMatch(excerpts[0].safeText, /Users\/alice|sk-secret-value/);
+    assert.deepEqual(excerpts.map((item) => item.evidenceId), ['ev_safe']);
+    assert.equal(excerpts[0].runId, 'run_current');
+    assert.equal(excerpts[0].safeText, 'export const provider = "embedding";');
+    assert.doesNotMatch(excerpts[0].safeText, /PRODUCER_FORGED_SUMMARY|sk-live-secret/);
+    const adapterSource = readFileSync(
+      new URL('../src/workers/claude/coverage-evidence.ts', import.meta.url),
+      'utf8',
+    );
+    assert.match(adapterSource, /MAX_WORKSPACE_EVIDENCE_FILE_BYTES/);
+    assert.match(adapterSource, /O_NONBLOCK/);
+    assert.match(adapterSource, /fstatSync|readSync/);
+    assert.doesNotMatch(adapterSource, /readFileSync\(candidate/);
+  } finally {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  }
 });
 
 test('presenter boundary: public presenter cannot accept raw result or keep business-keyword reply classification', () => {
